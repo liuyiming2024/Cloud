@@ -1,0 +1,62 @@
+{
+  "name": "Cloud Drive",
+  "version": "1.0.0",
+  "desc": "浏览器里的加密网盘。文件在离开这台浏览器之前就加密好了，之后它只是一段看不懂的字节。",
+  "homepage": "https://liuyiming2024.github.io/Cloud/",
+  "repo": "https://github.com/liuyiming2024/Cloud",
+  "storage": "密文存在私有 GitHub 仓库（由 Actions 搬运）。公开仓库只当暂存区用，里面从头到尾只有密文。",
+  "account": "复用 Chat / Code 的账号体系：同一个 Supabase 项目、同一张 users 表、同一套会话。三个页面同源，登录态共享。",
+  "endpoints": [
+    {
+      "path": "/Cloud/api/manifest.json",
+      "method": "GET",
+      "desc": "本项目元信息与接口清单（就是这份）"
+    }
+  ],
+  "pageApi": [
+    "Cloud.api.ready()            本页是否已可用（有令牌且口令已就位）",
+    "Cloud.api.reason()           不可用时返回原因，可用时返回 null",
+    "Cloud.api.init()             重新准备口令（换了账号或令牌之后调一次）",
+    "Cloud.api.list()             取存储目录，返回文件条目数组",
+    "Cloud.api.upload(file,name)  上传 File/Blob，返回文件 id（name 可选，Blob 没名字时要给）",
+    "Cloud.api.download(id)       下载，返回明文 Blob",
+    "Cloud.api.remove(id)         删除（无回收站）",
+    "Cloud.api.unlock(pass)       专业模式：显式交出本次会话的口令",
+    "Cloud.api.keyId()            当前口令的编号（单向，不含口令本身）",
+    "Cloud.api.who()              当前账号（只给截断的 uid，不给令牌）",
+    "Cloud.api.limits()           容量与体积上限",
+    "Cloud.api.manifest()         取回本清单",
+    "Cloud.api.on('change', fn)   订阅变更，返回取消订阅的函数"
+  ],
+  "limits": {
+    "gitFileMax": 104857600,
+    "gitFileMaxText": "100 MB —— 走 git 通道的单文件上限",
+    "releaseFileMax": 2147483648,
+    "releaseFileMaxText": "2 GB —— 超过 50 MB 自动改走 Release 资产通道",
+    "repoSoftMax": 1073741824,
+    "repoSoftMaxText": "1 GB —— 仓库总量建议上限，超了会越来越难维护",
+    "autoSwitchAt": 52428800,
+    "autoSwitchAtText": "50 MB —— 超过它自动切到 Release 通道，不用你选"
+  },
+  "crypto": {
+    "cipher": "AES-GCM 256",
+    "kdf": "PBKDF2-SHA256，250000 次迭代",
+    "keyDerive": "HKDF-SHA256（简单模式：账号 uid + 注册时间 + 轮次）",
+    "chunk": "4 MB 分块，每块独立随机 nonce，块序号进 GCM 附加校验数据",
+    "dedup": "用口令派生的密钥做 HMAC 内容指纹。不是明文 SHA-256 —— 不知口令者既算不出指纹，也拿它比对不了任何东西。",
+    "keyUniqueness": "简单模式的口令全局唯一。存的是口令编号（单向），撞号自动换轮次重算。"
+  },
+  "note": [
+    "站外只有上面这一个只读的静态 JSON。GitHub Pages 是纯静态托管，",
+    "没有服务端可以代理读写请求，因此不存在任何站外可调用的写入接口。",
+    "",
+    "Cloud.api 是页面内的编程接口，只在同源页面里可用（读的是本机 localStorage，",
+    "口令不跨页面传）。它能做的事与界面上的按钮完全相同，不会更多 ——",
+    "它拿不到私有存储库的地址，也拿不到那枚高权限令牌：",
+    "两者只存在于仓库的 Actions Secrets 里，任何前端代码都看不到。",
+    "",
+    "上传下载都不是直传：密文要先经过公开暂存区，由 GitHub Actions 搬一趟。",
+    "这是有代价的 —— 通常要等几十秒 —— 换来的是存储侧的凭据永不出现在浏览器里。"
+  ],
+  "updated": "2026-10-16"
+}
