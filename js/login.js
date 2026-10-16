@@ -1,7 +1,7 @@
 /* Cloud Drive · 登录页逻辑
  *
- * 流程尽量少一步：先直接试登录，只有服务端说"请先通过站点保护密码"，
- * 才把门禁那一步补出来。没有门禁的站点就不需要多输一次。
+ * 站点现在是「无门模式」，登录不需要先过保护密码 —— 所以这里没有门禁这一步，
+ * 填昵称和密码直接登。账号本身就是那道门。
  */
 (function () {
   var $ = function (s) { return document.querySelector(s); };
@@ -62,19 +62,6 @@
       log('可以登录另一个账号。登录后会覆盖本机的会话。');
     });
 
-    $('#gateGo').addEventListener('click', function () {
-      var p = $('#gatePwd').value;
-      if (!p) { log('先输保护密码', 'err'); return; }
-      $('#gateGo').disabled = true;
-      A.gateCheck(p).then(function () {
-        log('门禁已通过', 'ok');
-        $('#gateBox').style.display = 'none';
-        $('#loginBox').style.display = '';
-      }).catch(function (e) {
-        log('门禁失败：' + e.message, 'err');
-      }).then(function () { $('#gateGo').disabled = false; });
-    });
-
     $('#loginGo').addEventListener('click', doLogin);
     $('#pwd').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
 
@@ -101,11 +88,11 @@
       log('登录成功', 'ok');
       setTimeout(back, 300);
     }).catch(function (e) {
-      // 服务端要求先过门禁 → 把那一步补出来，不用用户猜
+      // 站点现在是「无门模式」，正常不该再冒出这句。
+      // 真冒出来了说明站点重新开了保护密码 —— 说清楚该去哪，别让用户干瞪眼。
       if (/保护密码/.test(e.message)) {
-        log('这个站点要先过保护密码');
-        $('#loginBox').style.display = 'none';
-        $('#gateBox').style.display = '';
+        log('这个站点开了保护密码，本页不提供输入它的入口。' +
+            '请先到 Chat 登录（那边有门禁），再回到本页 —— 登录态是共享的。', 'err');
       } else {
         log('登录失败：' + e.message, 'err');
       }
@@ -125,9 +112,8 @@
       $('#nick').value = n;
     }).catch(function (e) {
       if (/保护密码/.test(e.message)) {
-        log('这个站点要先过保护密码');
-        $('#regBox').style.display = 'none';
-        $('#gateBox').style.display = '';
+        log('这个站点开了保护密码，本页不提供输入它的入口。' +
+            '请先到 Chat 登录（那边有门禁），再回到本页。', 'err');
       } else {
         log('注册失败：' + e.message, 'err');
       }
