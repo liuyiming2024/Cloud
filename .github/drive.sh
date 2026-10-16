@@ -47,11 +47,20 @@ sha_of() { # 读某仓库某路径的 sha，不存在返回空
 }
 put_file() { # put_file <api> <token> <path> <本地文件> <message>
   local api="$1" tok="$2" path="$3" file="$4" msg="$5"
-  local b64 old
-  b64=$(base64 -w0 "$file")
+  # 差值推：先算本地内容的 git blob sha1，和远端比一下。
+  # 一样就不写 —— 白写一次就是一个 commit，仓库只增不减，攒多了会拖垮整个库。
+  local local_sha old
+  local_sha=$(git hash-object -- "$file" 2>/dev/null || \
+              { printf 'blob %d\0' "$(stat -c%s "$file")"; cat "$file"; } | sha1sum | cut -d' ' -f1)
   old=$(curl -sS -H "Authorization: token ${tok}" -H "Accept: application/vnd.github+json" \
         "${api}/contents/${path}?ref=main" | jq -r 'if type=="object" and .sha then .sha else "" end')
-  local body
+  if [ "$old" = "$local_sha" ]; then
+    echo "  差值跳过（内容未变）：${path}"
+    SKIPPED=$((SKIPPED + 1))
+    return 0
+  fi
+  local b64 body
+  b64=$(base64 -w0 "$file")
   if [ -n "$old" ]; then
     body=$(jq -n --arg m "$msg" --arg c "$b64" --arg s "$old" '{message:$m,content:$c,sha:$s}')
   else
@@ -60,10 +69,14 @@ put_file() { # put_file <api> <token> <path> <本地文件> <message>
   local out
   out=$(curl -sS -X PUT -H "Authorization: token ${tok}" \
         -H "Accept: application/vnd.github+json" "${api}/contents/${path}" -d "$body")
-  if echo "$out" | jq -e '.content and .commit' >/dev/null 2>&1; then return 0; fi
+  if echo "$out" | jq -e '.content and .commit' >/dev/null 2>&1; then
+    WROTE=$((WROTE + 1))
+    return 0
+  fi
   echo "::error::写文件失败 ${path}: $(echo "$out" | jq -r '.message // .')"
   return 1
 }
+SKIPPED=0; WROTE=0
 del_file() { # del_file <api> <token> <path> <message>
   local api="$1" tok="$2" path="$3" msg="$4"
   local old
@@ -82,7 +95,7 @@ echo "{}" > "$ST"
 [ -z "${DRIVE_REPO:-}" ] && DRIVE_REPO="liuyiming2024/Cloud_file"
 
 # --- 解析 meta -------------------------------------------------------------
-NAME=""; SIZE=0; KM=""; CAT=""; KID=""
+NAME=""; SIZE=0; KM=""; CAT=""; KID=""; FP=""; OID=""
 if [ -n "${META}" ]; then
   M=$(echo "${META}" | base64 -d 2>/dev/null || echo '{}')
   NAME=$(echo "$M" | jq -r '.name // ""')
@@ -91,7 +104,29 @@ if [ -n "${META}" ]; then
   CAT=$(echo "$M"  | jq -r '.cat // ""')        # 账号创建时间（bind 用）
   KID=$(echo "$M"  | jq -r '.kid // ""')        # 文件是用哪把口令加密的（存编号，不存口令）
   FP=$(echo "$M"   | jq -r '.fp // ""')         # 内容指纹，防重用
+  OID=$(echo "$M"  | jq -r '.oid // ""')        # 归属：登录账号的 uid，或匿名 uid
 fi
+
+# --- 归属与站长 -------------------------------------------------------------
+# 文件按归属分目录存：files/<oid>/<id>.bin
+# oid 只用于分目录，不是权限凭据 —— 真正的权限在下面这条链上。
+#
+# 站长判定用 github.actor：谁触发的 workflow，actor 就是谁。
+# 这是**不可伪造**的 —— 想让 actor 等于站长，就得有站长本人的 token，
+# 而那东西只在站长自己手里。相比之下，让页面传"我是站长"这种标记毫无意义：
+# 任何人都能传。所以这里只认 actor，不认页面说了什么。
+OWNER_LOGIN="${DRIVE_OWNER_LOGIN:-liuyiming2024}"
+IS_OWNER="false"
+[ "${ACTOR:-}" = "${OWNER_LOGIN}" ] && IS_OWNER="true"
+
+# oid 必须看起来像个 id：只允许字母数字和 - _，挡住 ../ 这类路径穿越
+sanitize_oid() {
+  echo "$1" | grep -Eq '^[A-Za-z0-9_-]{1,64}$' && echo "$1" || echo ""
+}
+OID=$(sanitize_oid "$OID")
+[ -z "$OID" ] && fail "缺少或不合法的归属标识（oid）"
+asset_name() { echo "${OID}__${ID}.bin"; }
+store_path() { echo "files/${OID}/${ID}.bin"; }
 
 # --- 索引读写（索引在私有库；文件名是密文，放哪都不泄密） -----------------
 read_index() {
@@ -166,9 +201,10 @@ case "$OP" in
       STORE="release"
       RID=$(ensure_release)
       [ -z "$RID" ] && fail "无法准备大文件存储位"
-      release_asset_up "$RID" "${ID}.bin" "$SRC" || fail "大文件写入存储失败"
+      # Release 资产不支持差值（只能删了重传），所以大文件不享受差值跳过
+      release_asset_up "$RID" "$(asset_name)" "$SRC" || fail "大文件写入存储失败"
     else
-      put_file "${DAPI}" "${DRIVE_PAT}" "files/${ID}.bin" "$SRC" "存入 ${ID}" \
+      put_file "${DAPI}" "${DRIVE_PAT}" "$(store_path)" "$SRC" "存入 ${ID}" \
         || fail "写入存储失败"
     fi
 
@@ -187,19 +223,20 @@ case "$OP" in
     fi
     NEW=$(echo "$IDX" | jq -c --arg id "$ID" --arg n "$NAME" --argjson s "$SIZE" \
           --argjson c "$CSIZE" --arg st "$STORE" --arg km "$KM" --arg kid "$KID" --arg fp "$FP" \
-          --arg t "$(date -u +%FT%TZ)" \
-          '.files = ([.files[]? | select(.id != $id)] + [{id:$id,name:$n,size:$s,cipher:$c,store:$st,km:$km,kid:$kid,fp:$fp,at:$t}])')
+          --arg oid "$OID" --arg t "$(date -u +%FT%TZ)" \
+          '.files = ([.files[]? | select(.id != $id)] + [{id:$id,name:$n,size:$s,cipher:$c,store:$st,km:$km,kid:$kid,fp:$fp,oid:$oid,at:$t}])')
     write_index "$NEW"
 
     del_file "${PAPI}" "${GITHUB_TOKEN}" "inbox/${JOB}.bin" "清理暂存 ${JOB}"
-    okjson "$(jq -n --arg id "$ID" --argjson c "$CSIZE" --arg st "$STORE" '{id:$id,cipher:$c,store:$st}')"
+    okjson "$(jq -n --arg id "$ID" --argjson c "$CSIZE" --arg st "$STORE" \
+            --argjson sk "$SKIPPED" '{id:$id,cipher:$c,store:$st,skipped_writes:$sk}')"
     ;;
 
   get)
     DST="/tmp/drive/out.bin"
-    if ! drive_raw "${DAPI}/contents/files/${ID}.bin?ref=main" -o "$DST" 2>/dev/null \
+    if ! drive_raw "${DAPI}/contents/$(store_path)?ref=main" -o "$DST" 2>/dev/null \
        || [ ! -s "$DST" ]; then
-      release_asset_down "${ID}.bin" "$DST" || fail "存储里没有这个文件：${ID}"
+      release_asset_down "$(asset_name)" "$DST" || fail "存储里没有这个文件：${ID}"
     fi
     CSIZE=$(stat -c%s "$DST")
     if [ "$CSIZE" -gt "${BIG}" ]; then
@@ -217,7 +254,9 @@ case "$OP" in
         -H "Content-Type: application/octet-stream" \
         "https://uploads.github.com/repos/${PAGE_OWNER}/${PAGE_REPO}/releases/${PRID}/assets?name=${ID}.bin" \
         --data-binary @"$DST" >/dev/null
-      okjson "$(jq -n --arg id "$ID" --argjson c "$CSIZE" --arg u "https://github.com/${PAGE_OWNER}/${PAGE_REPO}/releases/download/dl/${ID}.bin" '{id:$id,cipher:$c,channel:"release",url:$u}')"
+      okjson "$(jq -n --arg id "$ID" --argjson c "$CSIZE" \
+              --arg u "https://github.com/${PAGE_OWNER}/${PAGE_REPO}/releases/download/dl/${ID}.bin" \
+              '{id:$id,cipher:$c,channel:"release",url:$u}')"
     else
       put_file "${PAPI}" "${GITHUB_TOKEN}" "outbox/${JOB}.bin" "$DST" "取出 ${ID}" \
         || fail "回传暂存区失败"
@@ -226,13 +265,19 @@ case "$OP" in
     ;;
 
   del)
-    del_file "${DAPI}" "${DRIVE_PAT}" "files/${ID}.bin" "删除 ${ID}"
+    del_file "${DAPI}" "${DRIVE_PAT}" "$(store_path)" "删除 ${ID}"
     RID=$(drive "${DAPI}/releases/tags/latest" | jq -r '.id // empty')
     if [ -n "$RID" ]; then
-      AID=$(drive "${DAPI}/releases/${RID}/assets" | jq -r --arg n "${ID}.bin" '.[]|select(.name==$n)|.id'|head -1)
+      AID=$(drive "${DAPI}/releases/${RID}/assets" | jq -r --arg n "$(asset_name)" '.[]|select(.name==$n)|.id'|head -1)
       [ -n "$AID" ] && drive -X DELETE "${DAPI}/releases/assets/${AID}" >/dev/null
     fi
     IDX=$(read_index)
+    # 删自己的随便删；删别人的必须是站长。
+    # 判定用 actor，不用页面传来的 oid —— 后者谁都能填。
+    TARGET_OID=$(echo "$IDX" | jq -r --arg id "$ID" '.files[]?|select(.id==$id)|.oid' | head -1)
+    if [ -n "$TARGET_OID" ] && [ "$TARGET_OID" != "$OID" ] && [ "$IS_OWNER" != "true" ]; then
+      fail "这个文件不属于你（归属 ${TARGET_OID}），只有站长能处理别人的文件"
+    fi
     NEW=$(echo "$IDX" | jq -c --arg id "$ID" '.files = [.files[]? | select(.id != $id)]')
     write_index "$NEW"
     okjson "$(jq -n --arg id "$ID" '{id:$id}')"
@@ -240,9 +285,20 @@ case "$OP" in
 
   list)
     IDX=$(read_index)
-    put_file "${PAPI}" "${GITHUB_TOKEN}" "index.json" <(echo "$IDX") "同步目录" \
+    # 默认只看自己的；站长看全部（含所有匿名者的）。
+    # 这个"全部"只同步到**公开**仓库一份供站长浏览 —— 同步过去的是密文和编号，
+    # 没有口令，站长看到也解不开匿名者的文件内容，只知道"有这么个文件"。
+    if [ "$IS_OWNER" = "true" ]; then
+      VIEW=$(echo "$IDX" | jq -c '.')
+      SCOPE="all"
+    else
+      VIEW=$(echo "$IDX" | jq -c --arg o "$OID" '.files=[.files[]?|select(.oid==$o)]')
+      SCOPE="mine"
+    fi
+    put_file "${PAPI}" "${GITHUB_TOKEN}" "index.json" <(echo "$VIEW") "同步目录（${SCOPE}）" \
       || fail "目录同步回页面仓库失败"
-    okjson "$(jq -n --argjson n "$(echo "$IDX" | jq '.files|length')" '{count:$n}')"
+    okjson "$(jq -n --argjson n "$(echo "$VIEW" | jq '.files|length')" --arg s "$SCOPE" \
+            --arg o "$IS_OWNER" '{count:$n,scope:$s,owner:$o}')"
     ;;
 
   init)
