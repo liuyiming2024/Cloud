@@ -82,11 +82,15 @@ echo "{}" > "$ST"
 [ -z "${DRIVE_REPO:-}" ] && DRIVE_REPO="liuyiming2024/Cloud_file"
 
 # --- 解析 meta -------------------------------------------------------------
-NAME=""; SIZE=0
+NAME=""; SIZE=0; KM=""; CAT=""; KID=""
 if [ -n "${META}" ]; then
   M=$(echo "${META}" | base64 -d 2>/dev/null || echo '{}')
   NAME=$(echo "$M" | jq -r '.name // ""')
   SIZE=$(echo "$M" | jq -r '.size // 0')
+  KM=$(echo "$M"   | jq -r '.km // "simple"')   # 这个文件用的是哪种口令模式
+  CAT=$(echo "$M"  | jq -r '.cat // ""')        # 账号创建时间（bind 用）
+  KID=$(echo "$M"  | jq -r '.kid // ""')        # 文件是用哪把口令加密的（存编号，不存口令）
+  FP=$(echo "$M"   | jq -r '.fp // ""')         # 内容指纹，防重用
 fi
 
 # --- 索引读写（索引在私有库；文件名是密文，放哪都不泄密） -----------------
@@ -103,6 +107,11 @@ write_index() {
   local idx="$1"
   put_file "${DAPI}" "${DRIVE_PAT}" "index.json" <(echo "$idx") "更新索引 ${ID:-}" \
     || fail "索引写入私有库失败"
+}
+write_keys() {
+  local k="$1"
+  put_file "${DAPI}" "${DRIVE_PAT}" "keys.json" <(echo "$k") "更新口令登记表" \
+    || fail "口令登记表写入私有库失败"
 }
 
 # --- Release 通道（大文件） ------------------------------------------------
@@ -164,9 +173,22 @@ case "$OP" in
     fi
 
     IDX=$(read_index)
+    # 服务端再拦一道重复：指纹撞了就不写，直接回 dup。
+    # 前端已经查过一次，这一道是兜底 —— 两个标签页同时传同一个文件时，
+    # 前端各自都查不到对方，只有服务端看得见全貌。
+    if [ -n "$FP" ]; then
+      DUP=$(echo "$IDX" | jq -r --arg f "$FP" '[.files[]?|select(.fp==$f)]|length')
+      if [ "$DUP" != "0" ]; then
+        del_file "${PAPI}" "${GITHUB_TOKEN}" "inbox/${JOB}.bin" "清理重复上传 ${JOB}"
+        okjson "$(jq -n --arg id "$(echo "$IDX" | jq -r --arg f "$FP" '.files[]?|select(.fp==$f)|.id' | head -1)" \
+                '{dup:true,id:$id}')"
+        exit 0
+      fi
+    fi
     NEW=$(echo "$IDX" | jq -c --arg id "$ID" --arg n "$NAME" --argjson s "$SIZE" \
-          --argjson c "$CSIZE" --arg st "$STORE" --arg t "$(date -u +%FT%TZ)" \
-          '.files = ([.files[]? | select(.id != $id)] + [{id:$id,name:$n,size:$s,cipher:$c,store:$st,at:$t}])')
+          --argjson c "$CSIZE" --arg st "$STORE" --arg km "$KM" --arg kid "$KID" --arg fp "$FP" \
+          --arg t "$(date -u +%FT%TZ)" \
+          '.files = ([.files[]? | select(.id != $id)] + [{id:$id,name:$n,size:$s,cipher:$c,store:$st,km:$km,kid:$kid,fp:$fp,at:$t}])')
     write_index "$NEW"
 
     del_file "${PAPI}" "${GITHUB_TOKEN}" "inbox/${JOB}.bin" "清理暂存 ${JOB}"
@@ -227,7 +249,49 @@ case "$OP" in
     if [ -z "$(drive "${DAPI}/contents/index.json?ref=main" | jq -r '.sha // empty')" ]; then
       write_index '{"v":1,"files":[]}'
     fi
+    if [ -z "$(drive "${DAPI}/contents/keys.json?ref=main" | jq -r '.sha // empty')" ]; then
+      put_file "${DAPI}" "${DRIVE_PAT}" "keys.json" <(echo '{"v":1,"keys":[]}') "建口令登记表" \
+        || fail "登记表创建失败"
+    fi
     okjson '{}'
+    ;;
+
+  # 读取口令登记表（只回编号，不含任何口令）
+  keys)
+    K=$(drive_raw "${DAPI}/contents/keys.json?ref=main" 2>/dev/null)
+    if [ -z "$K" ] || ! echo "$K" | jq -e . >/dev/null 2>&1; then K='{"v":1,"keys":[]}'; fi
+    put_file "${PAPI}" "${GITHUB_TOKEN}" "keys.json" <(echo "$K" | jq -c '.') "同步口令登记表" \
+      || fail "登记表同步回页面仓库失败"
+    okjson "$(jq -n --argjson n "$(echo "$K" | jq '.keys|length')" '{count:$n}')"
+    ;;
+
+  # 登记一个账号的口令编号。撞了就返回 collide，页面换个轮次重算。
+  # 传进来的是编号（单向摘要），不是口令本身 —— 存储侧永远看不到口令。
+  bind)
+    KID=$(echo "$M" | jq -r '.kid // ""')
+    ROUND=$(echo "$M" | jq -r '.round // 0')
+    AID=$(echo "$M" | jq -r '.aid // ""')   # 账号的盲化标识，同样不存 uid 明文
+    [ -z "$KID" ] && fail "bind 缺少 kid"
+    [ -z "$AID" ] && fail "bind 缺少 aid"
+
+    K=$(drive_raw "${DAPI}/contents/keys.json?ref=main" 2>/dev/null)
+    if [ -z "$K" ] || ! echo "$K" | jq -e . >/dev/null 2>&1; then K='{"v":1,"keys":[]}'; fi
+
+    # 撞没撞：看这个编号是不是已经被**别的账号**用了
+    OTHER=$(echo "$K" | jq -r --arg k "$KID" --arg a "$AID" \
+            '[.keys[]?|select(.kid==$k and .aid!=$a)]|length')
+    if [ "$OTHER" != "0" ]; then
+      okjson "$(jq -n '{collide:true}')"
+    else
+      # 同一个账号的**历史轮次全部保留**（不是只留最新）。
+      # 手动刷新口令之后，之前用旧口令加密的文件还得打得开 ——
+      # 所以那条旧记录不能删，页面要能按 round 把它重算出来。
+      NEW=$(echo "$K" | jq -c --arg aid "$AID" --arg kid "$KID" --argjson r "$ROUND" \
+            --arg t "$(date -u +%FT%TZ)" \
+            '.keys = ([.keys[]? | select(.kid != $kid)] + [{aid:$aid,kid:$kid,round:$r,at:$t}])')
+      write_keys "$NEW"
+      okjson "$(jq -n --arg kid "$KID" --argjson r "$ROUND" '{collide:false,kid:$kid,round:$r}')"
+    fi
     ;;
 
   *)
