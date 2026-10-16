@@ -43,6 +43,11 @@ jobs:
       PAGE_REPO: ${{ github.event.repository.name }}
       DRIVE_PAT: ${{ secrets.DRIVE_PAT }}
       DRIVE_REPO: ${{ secrets.DRIVE_REPO || 'liuyiming2024/Cloud_file' }}
+      # 站长判定用 actor：谁触发的 workflow，actor 就是谁，伪造不了。
+      # 想让 actor 等于站长，就得有站长本人的 token。
+      # 所以页面传"我是站长"这类标记一律不看 —— 那东西谁都能传。
+      ACTOR: ${{ github.actor }}
+      DRIVE_OWNER_LOGIN: ${{ secrets.DRIVE_OWNER_LOGIN || 'liuyiming2024' }}
       OP: ${{ inputs.op }}
       JOB: ${{ inputs.job_id }}
       ID: ${{ inputs.id }}
