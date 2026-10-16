@@ -19,6 +19,10 @@ window.CloudCfg = {
   // 上传专用 token 存在浏览器本地，key 名
   tokenKey: 'cloud_drive_token',
 
+  // 后端地址。填了就走它 —— 游客什么都不用填，令牌在后端手里。
+  // 留空则退回直连 GitHub（那样必须自己填令牌）。
+  worker: '',
+
   crypto: {
     // PBKDF2 迭代次数。改了会导致旧文件解不开
     iterations: 250000,
