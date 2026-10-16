@@ -1,15 +1,27 @@
 /* Cloud Drive · 主流程
  *
- * 一句话说明这个页面在干什么：
- *   文件在你这里加密，密文经过一个公开的暂存区，由 Actions 搬进私有存储库。
- *   页面不知道那个私有库叫什么，也没有权限去碰它。
+ * 文件在你这里加密，密文经过一个公开的暂存区，由 Actions 搬进私有存储库。
+ * 页面不知道那个私有库叫什么，也没有权限去碰它。
  *
- * 页面上那枚 token 只需要能写这个公开仓库、能敲一下 Actions；
- * 真正能读写私有库的高权限令牌只存在于仓库的 Secrets 里，页面拿不到。
+ * 两种口令：
+ *   简单模式 —— 口令由账号算出，换设备登录同一个账号就自动得到同一把。
+ *              系统保证它全局唯一，撞了自动换一轮重算。
+ *   专业模式 —— 口令你自己定，谁都算不出来，也检查不了唯一性，因为系统看不到它。
  */
 (function () {
   const $ = (s) => document.querySelector(s);
-  const state = { mode: null, token: '', pass: '', files: [] };
+  const state = {
+    token: '',
+    mode: 'simple',       // simple | pro
+    proPass: '',          // 专业模式的口令，只在内存里
+    account: null,        // {uid, token, from, short}
+    createdAt: '',        // 账号注册时间，简单模式的因子之一
+    round: 0,             // 简单模式当前轮次（防重用的）
+    pass: '',             // 当前生效的口令
+    kid: '',              // 当前口令的编号
+    files: [],
+    keys: []              // 登记表里属于本账号的记录（含历史轮次）
+  };
 
   /* ---------- 小工具 ---------- */
   function log(msg, kind) {
@@ -31,10 +43,168 @@
     crypto.getRandomValues(a);
     return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
   }
-  function need(kind) {
-    if (!state.token) { log('先填上访问令牌', 'err'); return false; }
-    if (!state.pass && kind !== 'list') { log('先填入口令', 'err'); return false; }
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+  function lsGet(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }
+  function lsSet(k, v) { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
+
+  /* 盲化账号标识：存到私有库的是这个，不是 uid 明文 */
+  async function blindAid(uid) {
+    const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('aid:' + uid));
+    return btoa(String.fromCharCode(...new Uint8Array(d)))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '').slice(0, 22);
+  }
+
+  /* ---------- 主题 ---------- */
+  function initTheme() {
+    const btn = $('#theme');
+    function paint() {
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      btn.textContent = dark ? '☀️ 浅色' : '🌗 深色';
+    }
+    paint();
+    btn.addEventListener('click', () => {
+      const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const next = dark ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      lsSet('cloud_drive_theme', next);
+      paint();
+    });
+  }
+
+  /* ---------- 模式切换 ---------- */
+  function initMode() {
+    const seg = $('#modeSeg');
+    const hint = $('#modeHint');
+    const HINTS = {
+      simple: '口令由你的账号算出，不用记、换设备自动恢复。系统会检查它是否全球唯一。',
+      pro: '口令你自己定，忘了就永远打不开。系统看不到它，所以也检查不了唯一性。'
+    };
+    function paint() {
+      seg.querySelectorAll('button').forEach((b) =>
+        b.classList.toggle('on', b.dataset.mode === state.mode)
+      );
+      $('#simpleBox').style.display = state.mode === 'simple' ? '' : 'none';
+      $('#proBox').style.display = state.mode === 'pro' ? '' : 'none';
+      hint.textContent = HINTS[state.mode];
+    }
+    seg.querySelectorAll('button').forEach((b) =>
+      b.addEventListener('click', () => {
+        if (state.mode === b.dataset.mode) return;
+        state.mode = b.dataset.mode;
+        window.CloudId.setMode(state.mode);
+        paint();
+        if (state.mode === 'simple') ensureKey();
+        else { state.pass = state.proPass; state.kid = ''; }
+      })
+    );
+    state.mode = window.CloudId.mode();
+    paint();
+  }
+
+  /* ---------- 账号识别 ---------- */
+  async function detectAccount() {
+    const a = window.CloudId.account();
+    state.account = a;
+    if (!a) {
+      $('#whoNick').textContent = '未登录';
+      $('#whoSrc').textContent = '在 Chat 或 Code 登录后回到本页，会自动认出你';
+      return false;
+    }
+    $('#whoNick').textContent = '已识别 · ' + a.short + '…';
+    $('#whoSrc').textContent = '身份来自 ' + a.from + '（同源共享，本页不另建账号）';
     return true;
+  }
+
+  /* ---------- 简单模式：拿到一把全局唯一的口令 ---------- */
+  async function ensureKey(forceRefresh) {
+    if (!state.token) { log('先填访问令牌', 'err'); return false; }
+    if (!await detectAccount()) {
+      log('没识别到账号。先在 Chat 或 Code 登录，再回来点「重新识别」。', 'err');
+      return false;
+    }
+    const a = state.account;
+
+    if (state.createdAt === '') {
+      state.createdAt = await window.CloudId.fetchCreatedAt(a.uid);
+      log(state.createdAt ? '已取到账号注册时间' : '取不到注册时间，口令只用账号因子（照样能用）');
+    }
+
+    const aid = await blindAid(a.uid);
+    let round = parseInt(lsGet('cloud_drive_round', '0'), 10);
+    if (forceRefresh) round = round + 1;
+
+    // 撞了就换一轮重算。轮次进因子，所以换一位口令就完全不同。
+    for (let tries = 0; tries < 24; tries++) {
+      const pass = await window.CloudId.derivePass(a.uid, state.createdAt, round);
+      const kid = await window.CloudId.keyId(pass);
+      const job = randId();
+      await window.CloudApi.dispatch('bind', job, {
+        meta: b64json({ aid: aid, kid: kid, round: round })
+      });
+      const r = await window.CloudApi.waitJob(job);
+      if (r.collide) {
+        log('口令编号撞了（第 ' + round + ' 轮），自动换一轮重算…');
+        round++;
+        continue;
+      }
+      state.pass = pass;
+      state.kid = kid;
+      state.round = round;
+      lsSet('cloud_drive_round', String(round));
+      $('#kidText').textContent = kid + '  · 第 ' + round + ' 轮';
+      log(forceRefresh && round > 0
+        ? '口令已刷新（第 ' + round + ' 轮）。老文件仍能打开，旧口令已保留在登记表里。'
+        : '口令就位', 'ok');
+      return true;
+    }
+    log('连续 24 轮都撞号，这不该发生。别再试了，来查一下登记表。', 'err');
+    return false;
+  }
+
+  function b64json(o) {
+    return btoa(unescape(encodeURIComponent(JSON.stringify(o))));
+  }
+
+  /* 同步登记表里属于本账号的记录，拿到别的设备刷新的轮次 */
+  async function syncKeys() {
+    if (!state.account || state.mode !== 'simple') return;
+    const aid = await blindAid(state.account.uid);
+    try {
+      const job = randId();
+      await window.CloudApi.dispatch('keys', job);
+      await window.CloudApi.waitJob(job);
+      const raw = await window.CloudApi.readRaw('keys.json');
+      if (!raw) return;
+      const j = JSON.parse(new TextDecoder().decode(raw));
+      state.keys = (j.keys || []).filter((k) => k.aid === aid);
+      if (!state.keys.length) return;
+      const maxRound = Math.max.apply(null, state.keys.map((k) => k.round || 0));
+      if (maxRound > state.round) {
+        state.round = maxRound;
+        lsSet('cloud_drive_round', String(maxRound));
+        log('别处刷新过口令，本机已跟到第 ' + maxRound + ' 轮');
+      }
+    } catch (e) { /* 同步失败不影响主流程 */ }
+  }
+
+  /* 按编号找到对应的口令。老文件是用旧轮次的口令加密的，得能取回来。 */
+  async function passForKid(kid) {
+    if (state.mode !== 'simple') return state.proPass;
+    if (kid === state.kid) return state.pass;
+    const a = state.account;
+    if (!a) return state.pass;
+    const hit = state.keys.find((k) => k.kid === kid);
+    if (hit) {
+      return window.CloudId.derivePass(a.uid, state.createdAt, hit.round || 0);
+    }
+    // 登记表还没同步到就先本地扫一遍历史轮次
+    for (let r = 0; r <= state.round; r++) {
+      const p = await window.CloudId.derivePass(a.uid, state.createdAt, r);
+      if ((await window.CloudId.keyId(p)) === kid) return p;
+    }
+    return state.pass;
   }
 
   /* ---------- 启动 ---------- */
@@ -47,13 +217,33 @@
       log(state.token ? '令牌已存到本机浏览器' : '已清空本机令牌', 'ok');
     });
 
+    initTheme();
+    initMode();
+
+    $('#recheck').addEventListener('click', async () => {
+      if (await detectAccount() && state.mode === 'simple') {
+        state.createdAt = '';
+        ensureKey();
+      }
+    });
+
+    $('#refreshKey').addEventListener('click', () => {
+      if (!confirm('刷新口令？\n\n你会得到一把全新的口令。老文件仍能打开（旧口令会保留），\n但如果你清了浏览器数据、或换设备登不上原账号，老文件就报废了。\n\n只在怀疑泄露时刷新。')) return;
+      ensureKey(true);
+    });
+
+    $('#pass').addEventListener('input', () => {
+      state.proPass = $('#pass').value;
+      if (state.mode === 'pro') state.pass = state.proPass;
+    });
+
     $('#pick').addEventListener('change', () => renderPicked());
     $('#upload').addEventListener('click', doUpload);
     $('#refresh').addEventListener('click', loadList);
-    $('#pass').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && state.mode === 'list') loadList();
-    });
-    log('页面就位。先填令牌和口令，令牌只存在你这台浏览器里。');
+
+    detectAccount();
+    if (state.mode === 'simple') ensureKey();
+    log('页面就位。填好令牌，简单模式的口令会自动算出来。');
   }
 
   /* ---------- 上传 ---------- */
@@ -63,23 +253,35 @@
       ? fs.map((f) => '<span class="chip">' + esc(f.name) + ' · ' + fmt(f.size) + '</span>').join('')
       : '<span class="dim">还没选文件</span>';
   }
-  function esc(s) {
-    return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  }
 
   async function doUpload() {
-    if (!need()) return;
+    if (!state.token) { log('先填访问令牌', 'err'); return; }
+    if (!state.pass) {
+      if (state.mode === 'pro') { log('先填口令', 'err'); return; }
+      if (!await ensureKey()) return;
+    }
     const fs = Array.from($('#pick').files || []);
     if (!fs.length) { log('先选文件', 'err'); return; }
     $('#upload').disabled = true;
+
+    // 先取一次目录，拿已有指纹做防重
+    let known = [];
+    try { await loadList(true); known = state.files.map((f) => f.fp || ''); } catch (e) {}
 
     for (const f of fs) {
       const id = randId();
       try {
         log('加密中：' + f.name);
         const sealed = await window.CloudCrypto.encryptBlob(f, state.pass);
-        log('  密文 ' + fmt(sealed.size) + '（明文 ' + fmt(f.size) + '）');
 
+        const fp = await window.CloudCrypto.fingerprint(f, state.pass);
+        if (known.indexOf(fp) >= 0) {
+          log('跳过：' + f.name + '（存储里已经有完全一样的内容了）', 'err');
+          continue;
+        }
+        known.push(fp);
+
+        log('  密文 ' + fmt(sealed.size) + '（明文 ' + fmt(f.size) + '）');
         const job = randId();
         const b64 = await window.CloudApi.blobToB64(sealed, (done, total) => {
           if (done % (12 * 1024 * 1024) < 3 * 1024 * 1024 || done === total) {
@@ -88,26 +290,29 @@
         });
 
         log('写入公开暂存区…');
-        await window.CloudApi.write(
-          window.CloudCfg.inbox + '/' + job + '.bin',
-          b64,
-          '暂存 ' + job
-        );
+        await window.CloudApi.write(window.CloudCfg.inbox + '/' + job + '.bin', b64, '暂存 ' + job);
 
         log('通知 Actions 搬运…');
         await window.CloudApi.dispatch('put', job, {
-          id,
-          meta: btoa(unescape(encodeURIComponent(JSON.stringify({
+          id: id,
+          meta: b64json({
             name: await window.CloudCrypto.encryptText(f.name, state.pass),
-            size: f.size
-          }))))
+            size: f.size,
+            km: state.mode,
+            kid: state.kid,
+            fp: fp
+          })
         });
 
         log('等搬运回执…');
         const r = await window.CloudApi.waitJob(job, (waited) => {
           if (waited % 15000 < 3000) log('  已等 ' + Math.round(waited / 1000) + ' 秒');
         });
-        log('已存入：' + f.name + '（' + r.store + ' 通道，密文 ' + fmt(r.cipher) + '）', 'ok');
+        if (r.dup) {
+          log('跳过：' + f.name + '（存储里已经有完全一样的内容，服务端拦下了）', 'err');
+        } else {
+          log('已存入：' + f.name + '（' + r.store + ' 通道，密文 ' + fmt(r.cipher) + '）', 'ok');
+        }
       } catch (e) {
         log('失败：' + f.name + ' —— ' + e.message, 'err');
       }
@@ -120,23 +325,24 @@
   }
 
   /* ---------- 列目录 ---------- */
-  async function loadList() {
-    if (!state.token) { log('先填令牌', 'err'); return; }
-    $('#refresh').disabled = true;
+  async function loadList(quiet) {
+    if (!state.token) { if (!quiet) log('先填令牌', 'err'); return; }
+    if (!quiet) $('#refresh').disabled = true;
     try {
+      await syncKeys();
       const job = randId();
       await window.CloudApi.dispatch('list', job);
       await window.CloudApi.waitJob(job);
       const raw = await window.CloudApi.readRaw('index.json');
-      if (!raw) { state.files = []; renderList(); log('存储是空的'); return; }
+      if (!raw) { state.files = []; renderList(); if (!quiet) log('存储是空的'); return; }
       const idx = JSON.parse(new TextDecoder().decode(raw));
       state.files = idx.files || [];
       renderList();
-      log('目录已刷新，共 ' + state.files.length + ' 个文件');
+      if (!quiet) log('目录已刷新，共 ' + state.files.length + ' 个文件');
     } catch (e) {
-      log('列目录失败：' + e.message, 'err');
+      if (!quiet) log('列目录失败：' + e.message, 'err');
     } finally {
-      $('#refresh').disabled = false;
+      if (!quiet) $('#refresh').disabled = false;
     }
   }
 
@@ -146,24 +352,18 @@
       box.innerHTML = '<div class="dim">还没有文件</div>';
       return;
     }
-    box.innerHTML = state.files
-      .map((f) => {
-        let shown = '（口令不对或已损坏）';
-        try {
-          // 列目录时若口令已填就顺手解出文件名，没填就显示为密文条目
-          shown = state.pass ? window.CloudCrypto.decryptText(f.name, state.pass) : '🔒 加密文件名';
-        } catch (e) {}
-        return (
-          '<div class="row" data-id="' + f.id + '">' +
-          '<span class="nm">' + esc(shown) + '</span>' +
-          '<span class="sz">' + fmt(f.size || 0) + '</span>' +
-          '<span class="at">' + (f.at || '').slice(0, 10) + '</span>' +
-          '<button class="dl">下载</button>' +
-          '<button class="rm">删除</button>' +
-          '</div>'
-        );
-      })
-      .join('');
+    box.innerHTML = state.files.map((f) => {
+      let shown = '（口令不对或已损坏）';
+      try { shown = state.pass ? window.CloudCrypto.decryptText(f.name, state.pass) : '🔒 加密文件名'; } catch (e) {}
+      const tag = f.km === 'pro' ? '<span class="kid">专业</span>' : '';
+      return '<div class="row" data-id="' + f.id + '">' +
+        '<span class="nm">' + esc(shown) + ' ' + tag + '</span>' +
+        '<span class="sz">' + fmt(f.size || 0) + '</span>' +
+        '<span class="at">' + (f.at || '').slice(0, 10) + '</span>' +
+        '<button class="dl">下载</button>' +
+        '<button class="rm">删除</button>' +
+        '</div>';
+    }).join('');
     box.querySelectorAll('.dl').forEach((b) =>
       b.addEventListener('click', () => doDownload(b.closest('.row').dataset.id))
     );
@@ -174,8 +374,13 @@
 
   /* ---------- 下载 ---------- */
   async function doDownload(id) {
-    if (!need()) return;
+    if (!state.token) { log('先填令牌', 'err'); return; }
+    const rec = state.files.find((x) => x.id === id);
     try {
+      // 这个文件是用哪把口令加密的？可能不是当前这把。
+      const pass = await passForKid(rec && rec.kid ? rec.kid : state.kid);
+      if (rec && rec.kid && rec.kid !== state.kid) log('这个文件用的是旧口令，已自动取回');
+
       const job = randId();
       log('请 Actions 取文件…');
       await window.CloudApi.dispatch('get', job, { id });
@@ -194,25 +399,19 @@
       }
 
       log('解密中…');
-      const plain = await window.CloudCrypto.decryptBuffer(sealedBuf, state.pass);
+      const plain = await window.CloudCrypto.decryptBuffer(sealedBuf, pass);
 
       let name = 'file-' + id;
-      const rec = state.files.find((x) => x.id === id);
-      if (rec) { try { name = window.CloudCrypto.decryptText(rec.name, state.pass); } catch (e) {} }
+      if (rec) { try { name = window.CloudCrypto.decryptText(rec.name, pass); } catch (e) {} }
 
       const url = URL.createObjectURL(plain);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
       log('已下载：' + name + '（' + fmt(plain.size) + '）', 'ok');
 
-      if (r.channel === 'git') {
-        await window.CloudApi.remove(r.path, '清理下载暂存').catch(() => {});
-      }
+      if (r.channel === 'git') await window.CloudApi.remove(r.path, '清理下载暂存').catch(() => {});
     } catch (e) {
       log('下载失败：' + e.message, 'err');
     }
@@ -222,7 +421,7 @@
   async function doRemove(id) {
     const rec = state.files.find((x) => x.id === id);
     let nm = id;
-    if (rec && state.pass) { try { nm = window.CloudCrypto.decryptText(rec.name, state.pass); } catch (e) {} }
+    if (rec) { try { nm = window.CloudCrypto.decryptText(rec.name, await passForKid(rec.kid || state.kid)); } catch (e) {} }
     if (!confirm('删除「' + nm + '」？删掉之后没有任何找回的办法。')) return;
     try {
       const job = randId();
@@ -235,12 +434,5 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    boot();
-    $('#pass').addEventListener('input', () => {
-      state.pass = $('#pass').value;
-      if (state.mode === 'list') renderList();
-    });
-    state.mode = 'list';
-  });
+  document.addEventListener('DOMContentLoaded', boot);
 })();
