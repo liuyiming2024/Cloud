@@ -1,0 +1,73 @@
+name: drive
+
+# 搬运工。页面敲一下，它把密文在「公开暂存区」和「私有存储库」之间搬一趟。
+#
+# 页面端完全不知道私有库叫什么、在哪——仓库名只存在于 DRIVE_REPO 这个 Secret 里，
+# 高权限令牌只存在于 DRIVE_PAT 里。两者都不会出现在任何前端文件中。
+#
+# op:
+#   put   inbox/<job_id>.bin  ->  私有库           （上传）
+#   get   私有库              ->  outbox/<job_id>.bin（下载）
+#   del   私有库中删除该文件                        （删除）
+#   list  私有库 index.json   ->  公开 index.json   （列目录）
+#   init  确保私有库的 index.json 存在
+
+on:
+  workflow_dispatch:
+    inputs:
+      op:
+        description: 'put | get | del | list | init'
+        required: true
+      job_id:
+        description: '本次任务号，用于回执与暂存文件命名'
+        required: true
+      id:
+        description: '文件 id（put/get/del 用）'
+        required: false
+        default: ''
+      meta:
+        description: 'base64 后的 JSON：{"name":"密文文件名","size":明文字节数}'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      # workflow 自带的令牌，只能写本仓库；私有库的令牌在 Secrets 里
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PAGE_OWNER: ${{ github.repository_owner }}
+      PAGE_REPO: ${{ github.event.repository.name }}
+      DRIVE_PAT: ${{ secrets.DRIVE_PAT }}
+      DRIVE_REPO: ${{ secrets.DRIVE_REPO }}
+      OP: ${{ inputs.op }}
+      JOB: ${{ inputs.job_id }}
+      ID: ${{ inputs.id }}
+      META: ${{ inputs.meta }}
+      BIG: '52428800'
+    steps:
+      - name: 取出脚本
+        uses: actions/checkout@v4
+
+      - name: 检查配置
+        id: cfg
+        run: |
+          if [ -z "${DRIVE_PAT}" ] || [ -z "${DRIVE_REPO}" ]; then
+            echo "::error::缺少 Secrets：DRIVE_PAT 与 DRIVE_REPO 必须都配置好"
+            echo "ok=false" >> $GITHUB_OUTPUT
+            echo "msg=缺少 Secrets：DRIVE_PAT / DRIVE_REPO 未配置，请在仓库 Settings → Secrets and variables → Actions 里补上" >> $GITHUB_OUTPUT
+          else
+            echo "ok=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 执行
+        id: work
+        if: steps.cfg.outputs.ok == 'true'
+        run: bash .github/drive.sh
+
+      - name: 回写执行结果
+        if: always()
+        run: bash .github/report.sh "${{ steps.cfg.outputs.ok }}" "${{ steps.cfg.outputs.msg }}" "${{ steps.work.outcome }}" "${{ steps.work.outputs.msg }}"
