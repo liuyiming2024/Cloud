@@ -85,7 +85,12 @@
 
   function siteReady() { return rpc('site_ready', {}); }
 
-  /* 过站点保护密码。过了会拿到一个 gate_only token，顺手存下 */
+  /* 过站点保护密码。
+   *
+   * 现在站点是「无门模式」（gate_disabled），登录不需要先过门禁，
+   * 所以登录页不再走这一步 —— 这个函数留着只是为了兜底：
+   * 万一哪天站点重新开了保护密码，调用方能直接拿到它，不用再翻一遍 RPC。
+   * 账号这道门还在原处，取消保护密码不等于公开站点内容。 */
   function gateCheck(pwd) {
     return rpc('gate_check', { p: pwd }).then(function (t) {
       if (!t) throw new Error('保护密码错误');
