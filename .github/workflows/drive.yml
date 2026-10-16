@@ -42,7 +42,7 @@ jobs:
       PAGE_OWNER: ${{ github.repository_owner }}
       PAGE_REPO: ${{ github.event.repository.name }}
       DRIVE_PAT: ${{ secrets.DRIVE_PAT }}
-      DRIVE_REPO: ${{ secrets.DRIVE_REPO }}
+      DRIVE_REPO: ${{ secrets.DRIVE_REPO || 'liuyiming2024/Cloud_file' }}
       OP: ${{ inputs.op }}
       JOB: ${{ inputs.job_id }}
       ID: ${{ inputs.id }}
@@ -55,10 +55,11 @@ jobs:
       - name: 检查配置
         id: cfg
         run: |
-          if [ -z "${DRIVE_PAT}" ] || [ -z "${DRIVE_REPO}" ]; then
-            echo "::error::缺少 Secrets：DRIVE_PAT 与 DRIVE_REPO 必须都配置好"
+          # 只需要 DRIVE_PAT 一个 Secret：存储库名有默认值，填了 DRIVE_REPO 就覆盖它
+          if [ -z "${DRIVE_PAT}" ]; then
+            echo "::error::缺少 Secret：DRIVE_PAT"
             echo "ok=false" >> $GITHUB_OUTPUT
-            echo "msg=缺少 Secrets：DRIVE_PAT / DRIVE_REPO 未配置，请在仓库 Settings → Secrets and variables → Actions 里补上" >> $GITHUB_OUTPUT
+            echo "msg=缺少 Secret：DRIVE_PAT。请在 Cloud 仓库 Settings → Secrets and variables → Actions → New repository secret 里添加，名字手打 DRIVE_PAT（不要复制，容易带空格），值为那枚能读写私有存储库的令牌" >> $GITHUB_OUTPUT
           else
             echo "ok=true" >> $GITHUB_OUTPUT
           fi
