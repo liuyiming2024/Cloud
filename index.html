@@ -34,6 +34,13 @@
         <div class="src" id="whoSrc">在 Chat 或 Code 登录后回到本页，会自动认出你</div>
       </div>
       <button id="recheck">重新识别</button>
+      <button id="toLogin">去登录</button>
+      <button id="logout" style="display:none">退出</button>
+    </div>
+    <div id="needLogin" class="warn" style="display:none">
+      <b>还没识别到账号，简单模式用不了。</b>
+      简单模式的口令是由账号算出来的，没有账号就算不出来。
+      <br>去登录一个（和 Chat、Code 是同一套账号），或者切成<b>专业模式</b>自己定口令。
     </div>
 
     <div style="margin-top:14px">
@@ -125,6 +132,7 @@
 
 <script src="js/config.js"></script>
 <script src="js/crypto.js"></script>
+<script src="js/auth.js"></script>
 <script src="js/identity.js"></script>
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
