@@ -78,8 +78,8 @@
     const seg = $('#modeSeg');
     const hint = $('#modeHint');
     const HINTS = {
-      simple: '口令由你的账号算出，不用记、换设备自动恢复。系统会检查它是否全球唯一。',
-      pro: '口令你自己定，忘了就永远打不开。系统看不到它，所以也检查不了唯一性。'
+      simple: '口令自动算好，不用记，换电脑也在。',
+      pro: '口令自己定，忘了就打不开了。'
     };
     function paint() {
       const anon = window.CloudId.isAnon();
@@ -93,7 +93,7 @@
       $('#refreshKey').disabled = anon;
       seg.querySelectorAll('button').forEach((b) => { b.disabled = anon; });
       hint.textContent = anon
-        ? '未登录：只能用固定口令，站长能打开你传的东西。要保密，先登录。'
+        ? '没登录：站长能看到你传的东西。要保密，先登录。'
         : HINTS[state.mode];
     }
     seg.querySelectorAll('button').forEach((b) =>
@@ -120,7 +120,7 @@
     if (!a) {
       // 未登录也能用：归到本机的匿名 id 下，照样能传能取
       $('#whoNick').textContent = '未登录 · 匿名使用';
-      $('#whoSrc').textContent = '文件归在本机的匿名身份下。登录后可跨设备恢复。';
+      $('#whoSrc').textContent = '只认这台浏览器，换电脑就找不回了';
       $('#logout').style.display = 'none';
       $('#toLogin').style.display = '';
       // 匿名不是"功能缺失"，是"另一种约定"——必须把代价摆在眼前
@@ -128,7 +128,7 @@
       return false;
     }
     $('#whoNick').textContent = '已识别 · ' + a.short + '…';
-    $('#whoSrc').textContent = '身份来自 ' + a.from + '（同源共享，本页不另建账号）';
+    $('#whoSrc').textContent = '已登录';
     $('#logout').style.display = '';
     $('#toLogin').style.display = 'none';
     need.style.display = 'none';
@@ -214,7 +214,7 @@
       if (maxRound > state.round) {
         state.round = maxRound;
         lsSet('cloud_drive_round', String(maxRound));
-        log('别处刷新过口令，本机已跟到第 ' + maxRound + ' 轮');
+        log('口令在别处刷新过，已自动跟上');
       }
     } catch (e) { /* 同步失败不影响主流程 */ }
   }
@@ -295,7 +295,7 @@
 
     detectAccount();
     if (state.mode === 'simple') ensureKey();
-    log('页面就位。填好令牌，简单模式的口令会自动算出来。');
+    log('填好令牌就能用了。');
   }
 
   /* ---------- 上传 ---------- */
@@ -432,7 +432,7 @@
     try {
       // 这个文件是用哪把口令加密的？可能不是当前这把。
       const pass = await passForKid((rec && rec.kid) || state.kid, rec && rec.km);
-      if (rec && rec.kid && rec.kid !== state.kid) log('这个文件用的是旧口令，已自动取回');
+      if (rec && rec.kid && rec.kid !== state.kid) log('这个文件是用旧口令锁的，已自动取回');
 
       const job = randId();
       log('请 Actions 取文件…');
