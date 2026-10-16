@@ -23,10 +23,12 @@
   var CODE_UID = 'code_cloud_uid';
   var CODE_TOK = 'code_cloud_token';
 
-  // Chat 与 Code 用的是同一个 Supabase 项目和同一把 publishable key，
-  // 按它们的设计这把 key 本来就是公开的（等价于 anon key）
-  var SB_URL = 'https://pimryrsxkwyafmponegp.supabase.co';
-  var SB_KEY = 'sb_publishable_jPrK6j5l9NGbnLKcytTegg_di1njO8t';
+  // 后端地址从 auth.js 拿（那边是唯一真源）。auth.js 没加载时退回这里，
+  // 两边必须一致 —— 不一致就不是同一套账号体系了。
+  var SB_URL = (window.CloudAuth && window.CloudAuth.SB_URL) ||
+               'https://pimryrsxkwyafmponegp.supabase.co';
+  var SB_KEY = (window.CloudAuth && window.CloudAuth.SB_KEY) ||
+               'sb_publishable_jPrK6j5l9NGbnLKcytTegg_di1njO8t';
 
   var APP_SALT = 'cloud-drive-simple-v1';      // 应用固定盐，公开无妨
   var HKDF_INFO = 'cloud-drive/simple-key';    // HKDF info，换它等于换一批口令
@@ -43,18 +45,22 @@
     return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
-  /* ---------- 当前账号 ---------- */
-  // 顺序与 Code 的 cloud.js 一致：本应用自己登的优先，其次沿用 Chat 的
+  /* ---------- 当前账号 ----------
+   * 优先走 CloudAuth 的判定（它会尊重"主动退出过"这个标记），
+   * 取不到再按老办法读，保证单独引入本文件时也能用。 */
   function account() {
-    var uid = ls(CODE_UID) || ls(CHAT_UID) || '';
-    var tok = ls(CODE_TOK) || ls(CHAT_TOK) || '';
+    var uid = '', tok = '', from = '';
+    if (window.CloudAuth) {
+      uid = window.CloudAuth.uid() || '';
+      tok = window.CloudAuth.token() || '';
+      from = ls(CODE_UID) ? 'Cloud / Code' : 'Chat';
+    } else {
+      uid = ls(CODE_UID) || ls(CHAT_UID) || '';
+      tok = ls(CODE_TOK) || ls(CHAT_TOK) || '';
+      from = ls(CODE_UID) ? 'Cloud / Code' : 'Chat';
+    }
     if (!uid) return null;
-    return {
-      uid: uid,
-      token: tok,
-      from: ls(CODE_UID) ? 'Code' : 'Chat',
-      short: uid.slice(0, 8)
-    };
+    return { uid: uid, token: tok, from: from, short: uid.slice(0, 8) };
   }
 
   /* ---------- 查账号创建时间 ----------
