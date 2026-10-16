@@ -35,6 +35,34 @@ AES-GCM 256 位，口令经 PBKDF2-SHA256（25 万次迭代）派生密钥。
 文件分块加密，每块独立的随机 nonce，并把块序号放进 GCM 的附加校验数据——
 缺块、重排、截断都会在解密时直接报错，不会静默给你半个文件。
 
+
+## API
+
+站外只有一个只读的静态清单：
+
+```
+https://liuyiming2024.github.io/Cloud/api/manifest.json
+```
+
+GitHub Pages 是纯静态托管，没有服务端可以代理读写请求，
+因此**不存在任何站外可调用的写入接口**。
+
+页面内有一套编程接口 `Cloud.api`，供同源的其他页面或控制台脚本使用。
+它能做的事与界面上的按钮完全相同，不会更多——它拿不到私有存储库的地址，
+也拿不到那枚高权限令牌：
+
+```js
+await Cloud.api.init();
+const files = await Cloud.api.list();
+const id = await Cloud.api.upload(file);
+const blob = await Cloud.api.download(id);
+const off = Cloud.api.on('change', () => Cloud.api.list());
+```
+
+清单里的 `pageApi` 一节是完整方法表。改动接口后跑一次
+`node scripts/check-api.js .` —— 它会核对清单里声明的路径和方法是否真的存在，
+防止清单说谎。
+
 ## 许可
 
 保留所有权利。这是一个个人项目，不提供复刻与二次部署指南。
