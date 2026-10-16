@@ -3,11 +3,7 @@
 浏览器里的加密网盘。文件在你按下上传之前就已经是密文，
 之后它只是在两个仓库之间被搬了一趟——搬它的那一方，你这边也看不到。
 
-**在线地址**：<https://liuyiming2024.github.io/cloud/>
-
-> 页面托管在你的用户级 Pages 仓库（`liuyiming2024.github.io`）的 `cloud/` 目录下；
-> 它调用的 API 仍然指向 `liuyiming2024/Cloud`——托管位置和存取位置是分开的，
-> 所以换地方托管不影响任何功能。
+**在线地址**：<https://liuyiming2024.github.io/Cloud/>
 
 ## 怎么用
 
