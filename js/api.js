@@ -157,3 +157,46 @@
     dispatch, waitJob, blobToB64, b64ToBlob, req, repo
   };
 })();
+
+/* ---------- 后端模式 ----------
+ * 配了 worker 地址就走后端：令牌在后端手里，页面什么都不用填。
+ * 这才是游客该走的路 —— 让游客自己去找 GitHub 令牌是不现实的。 */
+(function () {
+  const W = () => (window.CloudCfg && window.CloudCfg.worker) || '';
+
+  async function wjson(url, opts) {
+    const r = await fetch(url, opts);
+    const t = await r.text();
+    let j;
+    try { j = JSON.parse(t); } catch (e) { throw new Error('后端返回了看不懂的东西：' + t.slice(0, 120)); }
+    if (!r.ok || j.ok === false) throw new Error(j.error || ('后端 ' + r.status));
+    return j;
+  }
+
+  window.CloudWorker = {
+    on: () => !!W(),
+
+    list: (oid) => wjson(W() + '/api/list?oid=' + encodeURIComponent(oid)),
+
+    put: async (oid, id, meta, blob) => {
+      const m = btoa(unescape(encodeURIComponent(JSON.stringify(meta))));
+      return wjson(W() + '/api/put?oid=' + encodeURIComponent(oid) +
+                   '&id=' + encodeURIComponent(id) +
+                   '&meta=' + encodeURIComponent(m), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: blob
+      });
+    },
+
+    get: async (oid, id) => {
+      const r = await fetch(W() + '/api/get?oid=' + encodeURIComponent(oid) +
+                            '&id=' + encodeURIComponent(id));
+      if (!r.ok) throw new Error('取不到文件');
+      return r.arrayBuffer();
+    },
+
+    del: (oid, id) => wjson(W() + '/api/del?oid=' + encodeURIComponent(oid) +
+                            '&id=' + encodeURIComponent(id), { method: 'DELETE' })
+  };
+})();
