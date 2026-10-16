@@ -82,15 +82,23 @@
       pro: '口令你自己定，忘了就永远打不开。系统看不到它，所以也检查不了唯一性。'
     };
     function paint() {
+      const anon = window.CloudId.isAnon();
       seg.querySelectorAll('button').forEach((b) =>
         b.classList.toggle('on', b.dataset.mode === state.mode)
       );
+      // 匿名时锁死：只有那一把固定口令，给不了选择。
+      // 给了选择就是骗人 —— 选了专业模式，站长就打不开你交上去的东西了。
       $('#simpleBox').style.display = state.mode === 'simple' ? '' : 'none';
       $('#proBox').style.display = state.mode === 'pro' ? '' : 'none';
-      hint.textContent = HINTS[state.mode];
+      $('#refreshKey').disabled = anon;
+      seg.querySelectorAll('button').forEach((b) => { b.disabled = anon; });
+      hint.textContent = anon
+        ? '未登录：只能用固定口令，站长能打开你传的东西。要保密，先登录。'
+        : HINTS[state.mode];
     }
     seg.querySelectorAll('button').forEach((b) =>
       b.addEventListener('click', () => {
+        if (window.CloudId.isAnon()) return;
         if (state.mode === b.dataset.mode) return;
         state.mode = b.dataset.mode;
         window.CloudId.setMode(state.mode);
@@ -110,12 +118,13 @@
     state.account = a;
     const need = $('#needLogin');
     if (!a) {
-      $('#whoNick').textContent = '未登录';
-      $('#whoSrc').textContent = '在 Chat 或 Code 登录后回到本页，会自动认出你';
+      // 未登录也能用：归到本机的匿名 id 下，照样能传能取
+      $('#whoNick').textContent = '未登录 · 匿名使用';
+      $('#whoSrc').textContent = '文件归在本机的匿名身份下。登录后可跨设备恢复。';
       $('#logout').style.display = 'none';
       $('#toLogin').style.display = '';
-      // 简单模式必须有账号，否则口令算不出来
-      need.style.display = state.mode === 'simple' ? '' : 'none';
+      // 匿名不是"功能缺失"，是"另一种约定"——必须把代价摆在眼前
+      need.style.display = '';
       return false;
     }
     $('#whoNick').textContent = '已识别 · ' + a.short + '…';
@@ -126,27 +135,39 @@
     return true;
   }
 
-  /* ---------- 简单模式：拿到一把全局唯一的口令 ---------- */
+  /* ---------- 拿到一把口令 ----------
+   * 登录了：口令由账号派生，全局唯一，撞了自动换轮次。
+   * 没登录：匿名模式，用 config 里那把写死的固定口令，没得选。 */
   async function ensureKey(forceRefresh) {
     if (!state.token) { log('先填访问令牌', 'err'); return false; }
-    if (!await detectAccount()) {
-      log('没识别到账号。先在 Chat 或 Code 登录，再回来点「重新识别」。', 'err');
-      return false;
-    }
-    const a = state.account;
+    await detectAccount();
 
+    // 匿名模式只有一把写死的口令，没有"算"这一过程，也不接受刷新。
+    // 刷新口令在这里是无意义的：换了它，站长就打不开你交上去的东西了。
+    if (window.CloudId.isAnon()) {
+      state.pass = window.CloudId.anonPass();
+      state.kid = await window.CloudId.keyId(state.pass);
+      state.round = 0;
+      $('#kidText').textContent = '匿名固定口令（不可改）';
+      log('匿名模式：用固定口令加密，站长能打开你上传的东西。', 'ok');
+      return true;
+    }
+
+    // 走到这儿说明已登录：口令由账号 uid + 注册时间 + 轮次派生
+    const oid = window.CloudId.ownerId();
     if (state.createdAt === '') {
-      state.createdAt = await window.CloudId.fetchCreatedAt(a.uid);
+      state.createdAt = await window.CloudId.fetchCreatedAt(oid);
       log(state.createdAt ? '已取到账号注册时间' : '取不到注册时间，口令只用账号因子（照样能用）');
     }
+    const createdAt = state.createdAt;
 
-    const aid = await blindAid(a.uid);
+    const aid = await blindAid(oid);
     let round = parseInt(lsGet('cloud_drive_round', '0'), 10);
     if (forceRefresh) round = round + 1;
 
     // 撞了就换一轮重算。轮次进因子，所以换一位口令就完全不同。
     for (let tries = 0; tries < 24; tries++) {
-      const pass = await window.CloudId.derivePass(a.uid, state.createdAt, round);
+      const pass = await window.CloudId.derivePass(oid, createdAt, round);
       const kid = await window.CloudId.keyId(pass);
       const job = randId();
       await window.CloudApi.dispatch('bind', job, {
@@ -178,8 +199,8 @@
 
   /* 同步登记表里属于本账号的记录，拿到别的设备刷新的轮次 */
   async function syncKeys() {
-    if (!state.account || state.mode !== 'simple') return;
-    const aid = await blindAid(state.account.uid);
+    if (state.mode !== 'simple') return;
+    const aid = await blindAid(window.CloudId.ownerId());
     try {
       const job = randId();
       await window.CloudApi.dispatch('keys', job);
@@ -198,19 +219,24 @@
     } catch (e) { /* 同步失败不影响主流程 */ }
   }
 
-  /* 按编号找到对应的口令。老文件是用旧轮次的口令加密的，得能取回来。 */
-  async function passForKid(kid) {
+  /* 按编号找到对应的口令。
+   *
+   * 两种特殊情况：
+   *   · 匿名文件 —— 固定口令，谁都能解（站长要能打开这些东西）；
+   *   · 旧轮次的文件 —— 用上传时那一轮的口令解，不是当前这把。 */
+  async function passForKid(kid, km) {
+    if (km === 'anon') return window.CloudId.anonPass();
     if (state.mode !== 'simple') return state.proPass;
     if (kid === state.kid) return state.pass;
-    const a = state.account;
-    if (!a) return state.pass;
+    const oid = window.CloudId.ownerId();
+    const createdAt = state.account ? state.createdAt : '';
     const hit = state.keys.find((k) => k.kid === kid);
     if (hit) {
-      return window.CloudId.derivePass(a.uid, state.createdAt, hit.round || 0);
+      return window.CloudId.derivePass(oid, createdAt, hit.round || 0);
     }
     // 登记表还没同步到就先本地扫一遍历史轮次
     for (let r = 0; r <= state.round; r++) {
-      const p = await window.CloudId.derivePass(a.uid, state.createdAt, r);
+      const p = await window.CloudId.derivePass(oid, createdAt, r);
       if ((await window.CloudId.keyId(p)) === kid) return p;
     }
     return state.pass;
@@ -324,9 +350,10 @@
           meta: b64json({
             name: await window.CloudCrypto.encryptText(f.name, state.pass),
             size: f.size,
-            km: state.mode,
+            km: window.CloudId.isAnon() ? 'anon' : state.mode,
             kid: state.kid,
-            fp: fp
+            fp: fp,
+            oid: window.CloudId.ownerId()
           })
         });
 
@@ -404,12 +431,15 @@
     const rec = state.files.find((x) => x.id === id);
     try {
       // 这个文件是用哪把口令加密的？可能不是当前这把。
-      const pass = await passForKid(rec && rec.kid ? rec.kid : state.kid);
+      const pass = await passForKid((rec && rec.kid) || state.kid, rec && rec.km);
       if (rec && rec.kid && rec.kid !== state.kid) log('这个文件用的是旧口令，已自动取回');
 
       const job = randId();
       log('请 Actions 取文件…');
-      await window.CloudApi.dispatch('get', job, { id });
+      await window.CloudApi.dispatch('get', job, {
+        id: id,
+        meta: b64json({ oid: (rec && rec.oid) || window.CloudId.ownerId() })
+      });
       const r = await window.CloudApi.waitJob(job, null, 15 * 60 * 1000);
 
       let sealedBuf;
@@ -447,11 +477,14 @@
   async function doRemove(id) {
     const rec = state.files.find((x) => x.id === id);
     let nm = id;
-    if (rec) { try { nm = window.CloudCrypto.decryptText(rec.name, await passForKid(rec.kid || state.kid)); } catch (e) {} }
+    if (rec) { try { nm = window.CloudCrypto.decryptText(rec.name, await passForKid(rec.kid || state.kid, rec.km)); } catch (e) {} }
     if (!confirm('删除「' + nm + '」？删掉之后没有任何找回的办法。')) return;
     try {
       const job = randId();
-      await window.CloudApi.dispatch('del', job, { id });
+      await window.CloudApi.dispatch('del', job, {
+        id: id,
+        meta: b64json({ oid: (rec && rec.oid) || window.CloudId.ownerId() })
+      });
       await window.CloudApi.waitJob(job);
       log('已删除：' + nm, 'ok');
       loadList();
