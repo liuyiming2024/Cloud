@@ -139,7 +139,7 @@
    * 登录了：口令由账号派生，全局唯一，撞了自动换轮次。
    * 没登录：匿名模式，用 config 里那把写死的固定口令，没得选。 */
   async function ensureKey(forceRefresh) {
-    if (!state.token) { log('先填访问令牌', 'err'); return false; }
+    if (!state.token && !window.CloudWorker.on()) { log('先填访问令牌', 'err'); return false; }
     await detectAccount();
 
     // 匿名模式只有一把写死的口令，没有"算"这一过程，也不接受刷新。
@@ -307,6 +307,7 @@
   }
 
   async function doUpload() {
+    if (window.CloudWorker.on()) return doUploadW();
     if (!state.token) { log('先填访问令牌', 'err'); return; }
     if (!state.pass) {
       if (state.mode === 'pro') { log('先填口令', 'err'); return; }
@@ -379,6 +380,7 @@
 
   /* ---------- 列目录 ---------- */
   async function loadList(quiet) {
+    if (window.CloudWorker.on()) return loadListW(quiet);
     if (!state.token) { if (!quiet) log('先填令牌', 'err'); return; }
     if (!quiet) $('#refresh').disabled = true;
     try {
@@ -397,6 +399,86 @@
     } finally {
       if (!quiet) $('#refresh').disabled = false;
     }
+  }
+
+  /* ---------- 后端通道 ----------
+   * 走这条路时页面不需要任何令牌 —— 令牌在后端手里。
+   * 逻辑和直连 GitHub 那条完全一致，只是不用等 Actions 跑一趟，快得多。 */
+  async function loadListW(quiet) {
+    try {
+      const r = await window.CloudWorker.list(window.CloudId.ownerId());
+      state.files = r.files || [];
+      renderList();
+      if (!quiet) log('目录已刷新，共 ' + state.files.length + ' 个文件');
+    } catch (e) { if (!quiet) log('列目录失败：' + e.message, 'err'); }
+  }
+
+  async function doUploadW() {
+    if (!state.pass) { if (!await ensureKey()) return; }
+    const fs = Array.from($('#pick').files || []);
+    if (!fs.length) { log('先选文件', 'err'); return; }
+    $('#upload').disabled = true;
+    const oid = window.CloudId.ownerId();
+
+    let known = [];
+    try { await loadListW(true); known = state.files.map((f) => f.fp || ''); } catch (e) {}
+
+    for (const f of fs) {
+      try {
+        log('加密中：' + f.name);
+        const sealed = await window.CloudCrypto.encryptBlob(f, state.pass);
+        const fp = await window.CloudCrypto.fingerprint(f, state.pass);
+        if (known.indexOf(fp) >= 0) { log('跳过：' + f.name + '（已经有了）', 'err'); continue; }
+        known.push(fp);
+
+        const r = await window.CloudWorker.put(oid, randId(), {
+          name: await window.CloudCrypto.encryptText(f.name, state.pass),
+          size: f.size,
+          km: window.CloudId.isAnon() ? 'anon' : state.mode,
+          kid: state.kid,
+          fp: fp
+        }, sealed);
+        log('已存入：' + f.name + '（密文 ' + fmt(r.cipher) + '）', 'ok');
+      } catch (e) {
+        log('失败：' + f.name + ' —— ' + e.message, 'err');
+      }
+    }
+    $('#upload').disabled = false;
+    $('#pick').value = '';
+    renderPicked();
+    loadListW();
+  }
+
+  async function doDownloadW(id) {
+    const rec = state.files.find((x) => x.id === id);
+    try {
+      const pass = await passForKid((rec && rec.kid) || state.kid, rec && rec.km);
+      const buf = await window.CloudWorker.get((rec && rec.oid) || window.CloudId.ownerId(), id);
+      log('解密中…');
+      const plain = await window.CloudCrypto.decryptBuffer(buf, pass);
+      let name = 'file-' + id;
+      if (rec) { try { name = window.CloudCrypto.decryptText(rec.name, pass); } catch (e) {} }
+      const url = URL.createObjectURL(plain);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      log('已下载：' + name + '（' + fmt(plain.size) + '）', 'ok');
+    } catch (e) {
+      log('下载失败：' + e.message, 'err');
+    }
+  }
+
+  async function doRemoveW(id) {
+    const rec = state.files.find((x) => x.id === id);
+    let nm = id;
+    if (rec) { try { nm = window.CloudCrypto.decryptText(rec.name, await passForKid(rec.kid || state.kid, rec.km)); } catch (e) {} }
+    if (!confirm('删除「' + nm + '」？删掉之后没有任何找回的办法。')) return;
+    try {
+      await window.CloudWorker.del((rec && rec.oid) || window.CloudId.ownerId(), id);
+      log('已删除：' + nm, 'ok');
+      loadListW();
+    } catch (e) { log('删除失败：' + e.message, 'err'); }
   }
 
   function renderList() {
@@ -427,6 +509,7 @@
 
   /* ---------- 下载 ---------- */
   async function doDownload(id) {
+    if (window.CloudWorker.on()) return doDownloadW(id);
     if (!state.token) { log('先填令牌', 'err'); return; }
     const rec = state.files.find((x) => x.id === id);
     try {
@@ -475,6 +558,7 @@
 
   /* ---------- 删除 ---------- */
   async function doRemove(id) {
+    if (window.CloudWorker.on()) return doRemoveW(id);
     const rec = state.files.find((x) => x.id === id);
     let nm = id;
     if (rec) { try { nm = window.CloudCrypto.decryptText(rec.name, await passForKid(rec.kid || state.kid, rec.km)); } catch (e) {} }
