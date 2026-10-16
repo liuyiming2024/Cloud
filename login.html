@@ -39,14 +39,6 @@
     </div>
   </div>
 
-  <!-- 门禁：站点保护密码 -->
-  <div class="panel" id="gateBox" style="display:none">
-    <label for="gatePwd">站点保护密码</label>
-    <input id="gatePwd" type="password" placeholder="这个站点的统一门禁密码">
-    <div class="hint">账号登录前要先过这一关。过了之后会记住，不用每次输。</div>
-    <div style="margin-top:10px"><button id="gateGo" class="primary">进入</button></div>
-  </div>
-
   <!-- 登录 -->
   <div class="panel" id="loginBox">
     <label for="nick">昵称</label>
@@ -92,6 +84,7 @@
       <p class="dim" style="font-size:13px;margin:10px 0">
         在已登录的 Chat 里申领一串票据码，粘贴到这里兑换登录。
         票据 5 分钟有效、只能用一次，且校验来源 —— 换一台机器就失效。
+        如果你已经登录了 Chat，直接打开本页就会自动认出你，不用兑换。
       </p>
       <input id="ticket" type="text" placeholder="粘贴票据码">
       <div style="margin-top:10px"><button id="redeemGo">兑换</button></div>
