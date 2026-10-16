@@ -77,6 +77,10 @@ del_file() { # del_file <api> <token> <path> <message>
 mkdir -p /tmp/drive
 echo "{}" > "$ST"
 
+# 存储库名：Secret 里没配就用默认值。真正的机密是令牌，不是库名——
+# 私有库就算被人知道名字，没有令牌一样打不开。
+[ -z "${DRIVE_REPO:-}" ] && DRIVE_REPO="liuyiming2024/Cloud_file"
+
 # --- 解析 meta -------------------------------------------------------------
 NAME=""; SIZE=0
 if [ -n "${META}" ]; then
