@@ -95,6 +95,7 @@
         state.mode = b.dataset.mode;
         window.CloudId.setMode(state.mode);
         paint();
+        detectAccount();   // 切到简单模式而没账号时，把提示亮出来
         if (state.mode === 'simple') ensureKey();
         else { state.pass = state.proPass; state.kid = ''; }
       })
@@ -107,13 +108,21 @@
   async function detectAccount() {
     const a = window.CloudId.account();
     state.account = a;
+    const need = $('#needLogin');
     if (!a) {
       $('#whoNick').textContent = '未登录';
       $('#whoSrc').textContent = '在 Chat 或 Code 登录后回到本页，会自动认出你';
+      $('#logout').style.display = 'none';
+      $('#toLogin').style.display = '';
+      // 简单模式必须有账号，否则口令算不出来
+      need.style.display = state.mode === 'simple' ? '' : 'none';
       return false;
     }
     $('#whoNick').textContent = '已识别 · ' + a.short + '…';
     $('#whoSrc').textContent = '身份来自 ' + a.from + '（同源共享，本页不另建账号）';
+    $('#logout').style.display = '';
+    $('#toLogin').style.display = 'none';
+    need.style.display = 'none';
     return true;
   }
 
@@ -219,6 +228,23 @@
 
     initTheme();
     initMode();
+
+    $('#toLogin').addEventListener('click', () => { location.href = 'login.html?back=1'; });
+
+    $('#logout').addEventListener('click', async () => {
+      if (!confirm('退出登录？\n\n已存的文件不受影响，但本页会停止使用你的账号派生口令，\n直到你再次登录。')) return;
+      try {
+        const r = await window.CloudAuth.logout();
+        log(r.shared
+          ? '已退出本页（登录态是从 Chat 沿用来的，Chat 那边的会话仍在；要真正退出请到 Chat 里操作）'
+          : '已退出', 'ok');
+      } catch (e) {
+        log('退出时出错：' + e.message, 'err');
+      }
+      state.account = null; state.pass = ''; state.kid = ''; state.keys = [];
+      $('#kidText').textContent = '（未生成）';
+      detectAccount();
+    });
 
     $('#recheck').addEventListener('click', async () => {
       if (await detectAccount() && state.mode === 'simple') {
