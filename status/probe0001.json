@@ -1,0 +1,4 @@
+{
+  "ok": false,
+  "error": "缺少 Secrets：DRIVE_PAT / DRIVE_REPO 未配置，请在仓库 Settings → Secrets and variables → Actions 里补上"
+}
