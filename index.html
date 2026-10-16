@@ -80,7 +80,7 @@
       </div>
     </div>
 
-    <div style="margin-top:14px">
+    <div style="margin-top:14px" id="tokenBox">
       <label for="token">访问令牌（GitHub Personal Access Token）</label>
       <div class="row2">
         <div><input id="token" type="password" placeholder="github_pat_..." autocomplete="off"></div>
@@ -124,6 +124,7 @@
 </div>
 
 <script src="js/config.js"></script>
+<script>/* 配了后端就把令牌框收起来，游客不用管它 */addEventListener("DOMContentLoaded",function(){if(window.CloudCfg&&window.CloudCfg.worker){var b=document.getElementById("tokenBox");if(b)b.style.display="none";}});</script>
 <script src="js/crypto.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/identity.js"></script>
