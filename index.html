@@ -37,10 +37,12 @@
       <button id="toLogin">去登录</button>
       <button id="logout" style="display:none">退出</button>
     </div>
-    <div id="needLogin" class="warn" style="display:none">
-      <b>还没识别到账号，简单模式用不了。</b>
-      简单模式的口令是由账号算出来的，没有账号就算不出来。
-      <br>去登录一个（和 Chat、Code 是同一套账号），或者切成<b>专业模式</b>自己定口令。
+    <div id="needLogin" class="warn danger" style="display:none">
+      <b>你正在匿名使用，传上去的东西站长能打开。</b>
+      匿名模式只有一把固定口令，它写在这个公开仓库的代码里 —— 站长能解，
+      任何翻到那份代码的人同样能解。这是设计如此：匿名上传的本意就是"交给站长"。
+      <br><b>要保密，就去登录</b>（和 Chat、Code 是同一套账号），登录后口令由你的账号派生，谁都算不出来。
+      <br>另外：匿名身份只存在这台浏览器里。清了浏览器数据、换台设备，你传的文件就再也找不回来了。
     </div>
 
     <div style="margin-top:14px">
