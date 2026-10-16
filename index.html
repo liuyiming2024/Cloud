@@ -5,28 +5,89 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cloud Drive</title>
 <link rel="stylesheet" href="css/style.css">
+<script>
+  /* 主题：默认浅色。在页面画出来之前就定好，避免闪一下白 */
+  (function () {
+    var t = 'light';
+    try { t = localStorage.getItem('cloud_drive_theme') || 'light'; } catch (e) {}
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
 </head>
 <body>
 <div class="wrap">
 
-  <h1><span class="dot"></span>Cloud Drive</h1>
-  <div class="sub">文件在离开这台浏览器之前就加密好了，之后它只是一段看不懂的字节。</div>
+  <div class="top">
+    <div class="grow">
+      <h1><span class="dot"></span>Cloud Drive</h1>
+      <div class="sub">文件在离开这台浏览器之前就加密好了，之后它只是一段看不懂的字节。</div>
+    </div>
+    <button id="theme" class="themebtn" title="切换浅色/深色">🌗 深色</button>
+  </div>
 
+  <!-- 账号与口令模式 -->
   <div class="panel">
-    <label for="token">访问令牌（GitHub Personal Access Token）</label>
-    <div class="row2">
-      <div><input id="token" type="password" placeholder="github_pat_..." autocomplete="off"></div>
-      <button id="saveToken">存到本机</button>
-    </div>
-    <div class="hint">
-      只存在这台浏览器的 localStorage 里，不上传、不写进代码。它只需要能写这个公开仓库、
-      能触发一次工作流；真正能读写私有存储库的高权限令牌在仓库的 Actions Secrets 里，这个页面拿不到。
+    <label>账号</label>
+    <div class="acct">
+      <div class="who">
+        <div class="nick" id="whoNick">未登录</div>
+        <div class="src" id="whoSrc">在 Chat 或 Code 登录后回到本页，会自动认出你</div>
+      </div>
+      <button id="recheck">重新识别</button>
     </div>
 
-    <div style="margin-top:12px">
+    <div style="margin-top:14px">
+      <label>口令模式</label>
+      <div class="seg" id="modeSeg">
+        <button data-mode="simple" class="on">简单模式</button>
+        <button data-mode="pro">专业模式</button>
+      </div>
+      <div class="hint" id="modeHint"></div>
+    </div>
+
+    <!-- 简单模式：口令由账号算出 -->
+    <div id="simpleBox" style="margin-top:14px">
+      <label>当前口令编号</label>
+      <div class="acct">
+        <div class="who"><span class="kid" id="kidText">（未生成）</span></div>
+        <button id="refreshKey">刷新口令</button>
+      </div>
+      <div class="warn">
+        <b>口令全局唯一，一旦冲突就必须换。</b>
+        系统按「账号 + 注册时间 + 轮次」算出你的口令，并检查它的编号是否已被别人占用；
+        撞了会自动换一轮重算，直到全球唯一为止。这个过程不需要你做任何事。
+      </div>
+      <div class="warn danger">
+        <b>手动刷新口令是有后果的操作。</b>
+        刷新后你会得到一把<b>全新的、与旧口令毫无关系</b>的口令：
+        <br>· 新上传的文件用新口令加密；
+        <br>· 老文件仍能打开——旧口令会保留在登记表中，页面按上传时的轮次自动取回；
+        <br>· 但如果你<b>清了浏览器数据</b>或<b>换了设备且登不上原账号</b>，旧口令就再也算不回来，那些文件等同于报废。
+        <br>只在怀疑口令泄露时刷新，别当按钮玩。
+      </div>
+    </div>
+
+    <!-- 专业模式：口令自己定 -->
+    <div id="proBox" style="margin-top:14px; display:none">
       <label for="pass">加密口令</label>
-      <input id="pass" type="password" placeholder="用来加密/解密文件，忘了就再也打不开" autocomplete="new-password">
-      <div class="hint">口令不上传、不存储。忘记口令 = 文件永久作废，没有任何找回通道。</div>
+      <input id="pass" type="password" placeholder="你自己定，谁都算不出来" autocomplete="new-password">
+      <div class="warn danger">
+        <b>这个口令不上传、不存储、无法找回。</b>
+        忘了、记岔了、少敲一位——文件永久作废，没有任何找回通道，也找不回客服。
+        它也不会被检查唯一性，因为系统根本看不到它。
+      </div>
+    </div>
+
+    <div style="margin-top:14px">
+      <label for="token">访问令牌（GitHub Personal Access Token）</label>
+      <div class="row2">
+        <div><input id="token" type="password" placeholder="github_pat_..." autocomplete="off"></div>
+        <button id="saveToken">存到本机</button>
+      </div>
+      <div class="hint">
+        只存在这台浏览器的 localStorage 里。它只需要能写这个公开仓库、能触发一次工作流；
+        真正能读写私有存储库的高权限令牌在仓库的 Actions Secrets 里，这个页面拿不到。
+      </div>
     </div>
   </div>
 
@@ -56,8 +117,7 @@
       <p>2. 密文写进一个<strong>公开</strong>仓库的暂存区。公开也没关系——那里从头到尾只有密文。</p>
       <p>3. 页面敲一下 GitHub Actions，它把密文从暂存区搬进<strong>私有</strong>存储库，然后清掉暂存区。</p>
       <p>4. 私有库的地址和那枚高权限令牌只存在于 Actions 的 Secrets 里。这个页面的任何一行代码都不知道它们。</p>
-      <p>已知代价：GitHub 单文件上限 100MB，仓库总量建议控制在 1GB 以内；
-      更大的文件会自动改走 Release 资产通道（单文件 2GB）。上传下载都要等 Actions 跑一趟，通常几十秒。</p>
+      <p>已知代价：GitHub 单文件上限 100MB，仓库总量建议控制在 1GB 以内；更大的文件会自动改走 Release 资产通道（单文件 2GB）。上传下载都要等 Actions 跑一趟，通常几十秒。</p>
     </details>
   </div>
 
@@ -65,6 +125,7 @@
 
 <script src="js/config.js"></script>
 <script src="js/crypto.js"></script>
+<script src="js/identity.js"></script>
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
 </body>
