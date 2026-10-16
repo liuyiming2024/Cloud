@@ -48,6 +48,50 @@
     );
   }
 
+  /* 内容指纹：给防重用。
+   *
+   * 不存明文的 SHA-256 —— 那等于把文件内容的可验证摘要交出去，
+   * 别人拿一份候选文件就能离线比对"他是不是存了这个"。
+   * 改成用口令派生的密钥做 HMAC：同样内容在同一口令下指纹相同（能查重），
+   * 但不知道口令的人既算不出指纹，也拿它比对不了任何东西。
+   *
+   * 分块算，避免大文件一次性进内存。 */
+  async function fingerprint(blob, passphrase) {
+    const salt = new Uint8Array(SALT_LEN); // 全零固定盐：指纹必须可复现
+    const key = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey'])
+      .then((b) => crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations: 1000, hash: 'SHA-256' },
+        b, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+      ));
+
+    const chunk = 4 * 1024 * 1024;
+    const total = blob.size;
+    const n = Math.max(1, Math.ceil(total / chunk));
+    // 长度先混进去，防止"前缀相同"的碰撞
+    let mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, u32(total)));
+
+    for (let i = 0; i < n; i++) {
+      const s = i * chunk;
+      const buf = await blob.slice(s, Math.min(s + chunk, total)).arrayBuffer();
+      const block = new Uint8Array(await crypto.subtle.sign('HMAC', key, buf));
+      // 块序号也混进去，顺序变了指纹就变
+      const merged = new Uint8Array(mac.length + block.length + 4);
+      merged.set(mac, 0);
+      merged.set(block, mac.length);
+      merged.set(u32(i), mac.length + block.length);
+      mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, merged));
+    }
+    return b64url(mac);
+  }
+
+  function b64url(u8) {
+    let s = '';
+    for (let i = 0; i < u8.length; i += 8192) {
+      s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+    }
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
   /* 加密：File/Blob → Blob（密文容器） */
   async function encryptBlob(blob, passphrase) {
     const salt = rand(SALT_LEN);
@@ -141,5 +185,5 @@
     return dec.decode(buf);
   }
 
-  window.CloudCrypto = { encryptBlob, decryptBuffer, encryptText, decryptText };
+  window.CloudCrypto = { encryptBlob, decryptBuffer, encryptText, decryptText, fingerprint };
 })();
