@@ -63,6 +63,43 @@
     return { uid: uid, token: tok, from: from, short: uid.slice(0, 8) };
   }
 
+  var ANON_KEY = 'cloud_drive_anon_uid';
+
+  /* ---------- 归属 id（决定文件存在哪个子目录） ----------
+   * 登录了就是账号 uid；没登录就用一个本机生成的匿名 id。
+   *
+   * 匿名 id 存在 localStorage —— 它有和"专业模式口令"一样的性质：
+   * 不上传、不备份，清了浏览器数据就没了，那些文件也就再也找不回来。
+   * 所以界面上必须把这句话说清楚，不能让人稀里糊涂地用。 */
+  function anonUid() {
+    var v = ls(ANON_KEY);
+    if (v) return v;
+    var a = new Uint8Array(16);
+    crypto.getRandomValues(a);
+    v = 'anon-' + Array.prototype.map.call(a, function (b) {
+      return ('0' + b.toString(16)).slice(-2);
+    }).join('');
+    lsSet(ANON_KEY, v);
+    return v;
+  }
+
+  /* 当前这份文件归谁 —— 登录了归账号，没登录归这台浏览器 */
+  function ownerId() {
+    var a = account();
+    return a ? a.uid : anonUid();
+  }
+  function isAnon() { return !account(); }
+
+  /* 匿名模式只有一把口令：写死在 config 里的那个，没得选。
+   *
+   * 这不是偷懒 —— 匿名上传的东西是"交给站长的"，站长必须能打开。
+   * 要让站长能打开，口令就不能由这台浏览器随机决定。
+   * 所以匿名模式下模式切换是被禁掉的（见 app.js 的 paint()），
+   * 用户选不了别的口令，也就不会误以为自己传的东西是保密的。 */
+  function anonPass() {
+    return (window.CloudCfg && window.CloudCfg.anonPass) || '';
+  }
+
   /* ---------- 查账号创建时间 ----------
    * 只在首次绑定时查一次。查不到不报错，降级成 uid-only，
    * 照样能用，只是少一个因子。快照一旦写下就不再依赖它。 */
@@ -113,6 +150,10 @@
 
   window.CloudId = {
     account: account,
+    anonUid: anonUid,
+    ownerId: ownerId,
+    isAnon: isAnon,
+    anonPass: anonPass,
     fetchCreatedAt: fetchCreatedAt,
     derivePass: derivePass,
     keyId: keyId,
