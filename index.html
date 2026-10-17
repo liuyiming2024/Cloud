@@ -78,6 +78,24 @@
       <div class="warn danger">
         <b>口令忘了就完了。</b>没有找回，没有客服，文件永久打不开。
       </div>
+      <div style="margin-top:12px">
+        <label>专业档附加</label>
+        <label class="cb"><input type="checkbox" id="optZip" checked> 压缩后加密</label>
+        <label class="cb"><input type="checkbox" id="optVol"> 分卷（每卷 8MB，坏了只补那一卷）</label>
+        <label class="cb"><input type="checkbox" id="optVerify"> 传完自动校验一遍</label>
+        <div class="hint">
+          分卷会让上传轮数变多，小文件勾它只会更慢。丢任何一卷，整份文件都解不开 ——
+          它换来的是"单卷失败只需重传那一卷"，不是"丢几卷还能救回来"。
+        </div>
+      </div>
+
+      <div style="margin-top:12px" class="row2">
+        <button id="btnManifest">导出校验清单</button>
+        <button id="btnVerify">校验全部</button>
+        <button id="btnExport">批量导出（ZIP）</button>
+      </div>
+      <div class="hint">批量导出会逐个解密再打包，文件多的时候要等一会儿。</div>
+
       <div class="warn">
         <b>专业档会先压缩再加密。</b>
         文本、代码、日志能压掉大半；照片、视频本来就压过了，压了也不会变小 ——
@@ -135,6 +153,7 @@
 <script src="js/auth.js"></script>
 <script src="js/identity.js"></script>
 <script src="js/api.js"></script>
+<script src="js/pro.js"></script>
 <script src="js/pageapi.js"></script>
 <script src="js/bridge.js"></script>
 <script src="js/app.js"></script>
