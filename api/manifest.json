@@ -28,7 +28,8 @@
     "Cloud.api.manifest()         取回本清单",
     "Cloud.api.channel()          当前走哪条通道：worker（快，秒级）／actions（慢，要等 Actions）",
     "Cloud.api.version()          契约版本号（属性），改接口必须跟着 bump，改接口必须跟着 bump",
-    "Cloud.api.on('change', fn)   订阅变更，返回取消订阅的函数"
+    "Cloud.api.on('change', fn)   订阅变更，返回取消订阅的函数",
+    "Cloud.api.upload(file,name,proc) 第三参：'auto'（默认压）|'gzip'|'none'"
   ],
   "limits": {
     "gitFileMax": 104857600,
@@ -46,7 +47,8 @@
     "keyDerive": "HKDF-SHA256（简单模式：账号 uid + 注册时间 + 轮次）",
     "chunk": "4 MB 分块，每块独立随机 nonce，块序号进 GCM 附加校验数据",
     "dedup": "用口令派生的密钥做 HMAC 内容指纹。不是明文 SHA-256 —— 不知口令者既算不出指纹，也拿它比对不了任何东西。",
-    "keyUniqueness": "简单模式的口令全局唯一。存的是口令编号（单向），撞号自动换轮次重算。"
+    "keyUniqueness": "简单模式的口令全局唯一。存的是口令编号（单向），撞号自动换轮次重算。",
+    "proc": "专业档先压缩（gzip）再加密。压不动的内容自动存原样。方式写在密文头，下载时自动还原。"
   },
   "note": [
     "站外只有上面这一个只读的静态 JSON。GitHub Pages 是纯静态托管，",
