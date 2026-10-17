@@ -137,13 +137,18 @@
       return files;
     },
 
-    /* 上传：file 是 File 或 Blob，name 可选（Blob 没有名字时要给） */
+    /* 上传：file 是 File 或 Blob，name 可选（Blob 没有名字时要给）
+     * proc: 'auto'（推荐，压了更小才压）| 'gzip' | 'none'
+     *       —— 只给建议，压不压由加密层决定。
+     *       调用方**不要自己先压一遍**：我们的容器是"先压缩再加密"，
+     *       传进来什么就当明文存什么，提前压过会把 gzip 二进制当明文存进去，
+     *       下载出来还是二进制，而且不报错 —— 文件在，只是打不开，最难查。 */
     upload: async function (file, name, proc) {
       if (!await ensure()) throw new Error(P.reason);
       const nm = name || file.name || ('blob-' + randId());
       const id = randId();
 
-      const enc = await window.CloudCrypto.encryptBlob(file, P.pass, procArg);
+      const enc = await window.CloudCrypto.encryptBlob(file, P.pass, proc || 'auto');
       const sealed = enc.blob;
       const fp = await window.CloudCrypto.fingerprint(file, P.pass);
 
@@ -155,7 +160,6 @@
         await window.CloudWorker.put(window.CloudId.ownerId(), id, {
           name: await window.CloudCrypto.encryptText(nm, P.pass),
           size: file.size,
-          proc: enc.proc,
           km: window.CloudId.isAnon() ? 'anon' : (P.kid ? 'simple' : 'pro'),
           kid: P.kid,
           fp: fp,
@@ -175,7 +179,8 @@
           size: file.size,
           km: P.kid ? 'simple' : 'pro',
           kid: P.kid,
-          fp: fp
+          fp: fp,
+          proc: enc.proc
         })
       });
       const r = await window.CloudApi.waitJob(job);
