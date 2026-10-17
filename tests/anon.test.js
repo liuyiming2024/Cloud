@@ -39,8 +39,8 @@ const dig=await crypto.subtle.digest('SHA-256', new TextEncoder().encode('aid:'+
 ok('归属标识被盲化后才送出', !Buffer.from(new Uint8Array(dig)).includes(a1));
 
 // 登录之后
-globalThis.CloudAuth.setSession('tok','uid-real-999');
-store['code_cloud_uid']='uid-real-999'; store['code_cloud_token']='tok';
+// 登录由统一登录页完成，写的是 wxlg_sb_*
+store['wxlg_sb_token']='tok'; store['wxlg_sb_uid']='uid-real-999';
 ok('登录后不再是匿名', I.isAnon()===false);
 ok('登录后归属 = 账号 uid', I.ownerId()==='uid-real-999');
 ok('登录后归属不再是匿名 id', I.ownerId()!==a1);
