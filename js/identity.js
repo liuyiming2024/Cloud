@@ -24,12 +24,11 @@
   var CODE_UID = 'code_cloud_uid';   // 老版本 Cloud 自己写的，保留读取
   var CODE_TOK = 'code_cloud_token';
 
-  // 后端地址从 auth.js 拿（那边是唯一真源）。auth.js 没加载时退回这里，
-  // 两边必须一致 —— 不一致就不是同一套账号体系了。
-  var SB_URL = (window.CloudAuth && window.CloudAuth.SB_URL) ||
-               'https://pimryrsxkwyafmponegp.supabase.co';
-  var SB_KEY = (window.CloudAuth && window.CloudAuth.SB_KEY) ||
-               'sb_publishable_jPrK6j5l9NGbnLKcytTegg_di1njO8t';
+  // 后端地址与密钥不在这里写。
+  // 之前这里有一份硬编码的 fallback，看着是"兜底"，实际是第二份真源 ——
+  // 两处必然漂移，而且把连接信息摊在了每个文件里。
+  // 现在一律走 window.CloudAuth.rpc()，那边统一管。
+  // 拿不到就降级，不去自己拼 URL。
 
   var APP_SALT = 'cloud-drive-simple-v1';      // 应用固定盐，公开无妨
   var HKDF_INFO = 'cloud-drive/simple-key';    // HKDF info，换它等于换一批口令
@@ -101,17 +100,24 @@
   }
 
   /* ---------- 查账号创建时间 ----------
-   * 只在首次绑定时查一次。查不到不报错，降级成 uid-only，
-   * 照样能用，只是少一个因子。快照一旦写下就不再依赖它。 */
+   *
+   * 只走 RPC 函数层，不直接查 users 表。
+   * 直接查表 = 拿 anon key 去读数据表，安全性全压在 RLS 上；
+   * RLS 配错一次就是整张表可读。RPC 由函数自己决定给什么，不依赖表的 policy。
+   *
+   * 这个函数不一定存在（要站长在库里建）。不存在就返回 ''，
+   * 口令少一个因子而已，照样能用 —— 不能因为拿不到就退回直连表。 */
   function fetchCreatedAt(uid) {
-    var url = SB_URL + '/rest/v1/users?select=created_at&id=eq.' + encodeURIComponent(uid);
-    return fetch(url, {
-      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, Accept: 'application/json' }
-    }).then(function (r) {
-      if (!r.ok) return '';
-      return r.json().then(function (j) {
-        return (j && j[0] && j[0].created_at) ? String(j[0].created_at) : '';
-      });
+    if (!uid) return Promise.resolve('');
+    if (!window.CloudAuth || typeof window.CloudAuth.rpc !== 'function') {
+      return Promise.resolve('');
+    }
+    return window.CloudAuth.rpc('user_created_at', { p_uid: uid }).then(function (r) {
+      if (r == null) return '';
+      if (typeof r === 'string') return r;
+      if (r.created_at) return String(r.created_at);
+      if (r.ok === false) return '';
+      return '';
     }).catch(function () { return ''; });
   }
 
