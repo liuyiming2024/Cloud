@@ -244,6 +244,10 @@
 
   /* ---------- 启动 ---------- */
   function boot() {
+    // 先把全站身份层拉起来，再识别账号 ——
+    // 否则 SiteIdentity 还没到，account() 读不到人，会误判成"未登录"。
+    window.CloudAuth.load().then(detectAccount);
+
     state.token = localStorage.getItem(window.CloudCfg.tokenKey) || '';
     $('#token').value = state.token;
     $('#saveToken').addEventListener('click', () => {
@@ -255,15 +259,13 @@
     initTheme();
     initMode();
 
-    $('#toLogin').addEventListener('click', () => { location.href = 'login.html?back=1'; });
+    $('#toLogin').addEventListener('click', () => { window.CloudAuth.goLogin('index.html'); });
 
     $('#logout').addEventListener('click', async () => {
       if (!confirm('退出登录？\n\n已存的文件不受影响，但本页会停止使用你的账号派生口令，\n直到你再次登录。')) return;
       try {
-        const r = await window.CloudAuth.logout();
-        log(r.shared
-          ? '已退出本页（登录态是从 Chat 沿用来的，Chat 那边的会话仍在；要真正退出请到 Chat 里操作）'
-          : '已退出', 'ok');
+        await window.CloudAuth.logout();
+        log('已退出', 'ok');
       } catch (e) {
         log('退出时出错：' + e.message, 'err');
       }
