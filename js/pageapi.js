@@ -138,12 +138,13 @@
     },
 
     /* 上传：file 是 File 或 Blob，name 可选（Blob 没有名字时要给） */
-    upload: async function (file, name) {
+    upload: async function (file, name, proc) {
       if (!await ensure()) throw new Error(P.reason);
       const nm = name || file.name || ('blob-' + randId());
       const id = randId();
 
-      const sealed = await window.CloudCrypto.encryptBlob(file, P.pass);
+      const enc = await window.CloudCrypto.encryptBlob(file, P.pass, procArg);
+      const sealed = enc.blob;
       const fp = await window.CloudCrypto.fingerprint(file, P.pass);
 
       // 前端先查一次重
@@ -154,9 +155,11 @@
         await window.CloudWorker.put(window.CloudId.ownerId(), id, {
           name: await window.CloudCrypto.encryptText(nm, P.pass),
           size: file.size,
+          proc: enc.proc,
           km: window.CloudId.isAnon() ? 'anon' : (P.kid ? 'simple' : 'pro'),
           kid: P.kid,
-          fp: fp
+          fp: fp,
+          proc: enc.proc
         }, sealed);
         emit();
         return id;
