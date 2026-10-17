@@ -26,6 +26,8 @@
     "Cloud.api.who()              当前账号（只给截断的 uid，不给令牌）",
     "Cloud.api.limits()           容量与体积上限",
     "Cloud.api.manifest()         取回本清单",
+    "Cloud.api.channel()          当前走哪条通道：worker（快，秒级）／actions（慢，要等 Actions）",
+    "Cloud.api.version            契约版本号，改接口必须跟着 bump",
     "Cloud.api.on('change', fn)   订阅变更，返回取消订阅的函数"
   ],
   "limits": {
@@ -58,5 +60,14 @@
     "上传下载都不是直传：密文要先经过公开暂存区，由 GitHub Actions 搬一趟。",
     "这是有代价的 —— 通常要等几十秒 —— 换来的是存储侧的凭据永不出现在浏览器里。"
   ],
-  "updated": "2026-10-16"
+  "updated": "2026-10-16",
+  "bridge": {
+    "note": "与 Code 的项目云盘（code_files）是两个独立的盘，不会自动互相同步。",
+    "codeFiles": "走 Supabase，秒级，存代码原文（明文），按路径组织，单文件 2MB、总量 50MB",
+    "cloudDrive": "走 GitHub，要等 Actions，内容在离开浏览器前加密，单文件 2GB",
+    "account": "两者账号同一套（全站统一身份），但存储完全独立",
+    "howCodeCallsCloud": "Code 用同源隐藏 iframe 加载本页，直接访问 contentWindow.Cloud.api",
+    "howCloudCallsCode": "本页嵌在 Code 里时，可用 CloudBridge.importFromCode(path) 把小文件转存进来",
+    "selfCheck": "node scripts/check-bridge.js . —— 核对 Code 会调的方法是否都还在"
+  }
 }
