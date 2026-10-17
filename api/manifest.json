@@ -27,7 +27,7 @@
     "Cloud.api.limits()           容量与体积上限",
     "Cloud.api.manifest()         取回本清单",
     "Cloud.api.channel()          当前走哪条通道：worker（快，秒级）／actions（慢，要等 Actions）",
-    "Cloud.api.version            契约版本号，改接口必须跟着 bump",
+    "Cloud.api.version()          契约版本号（属性），改接口必须跟着 bump，改接口必须跟着 bump",
     "Cloud.api.on('change', fn)   订阅变更，返回取消订阅的函数"
   ],
   "limits": {
