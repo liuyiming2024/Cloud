@@ -6,7 +6,8 @@
  *
  * 密文容器格式：
  *   "CDRV"            4B  魔数
- *   ver               1B  版本号
+ *   ver               1B  版本号（1=无预处理，2=带预处理）
+ *   [ver>=2] proc     1B  预处理方式：0=原样，1=gzip
  *   salt             16B  PBKDF2 盐，每次加密随机
  *   chunkSize         4B  分块大小（uint32 大端）
  *   重复直到结束：
@@ -16,6 +17,12 @@
  *
  * 每块把「块序号」放进 additionalData：
  * 缺块、重排、截断都会在解密时直接抛错，不会静默产出半个文件。
+ *
+ * 预处理发生在加密**之前**：先压缩，再加密。
+ * 顺序不能反 —— 加密后的字节是均匀随机的，压不动，先加密再压缩只会白费力气。
+ *
+ * 解压发生在解密之后。proc 写在密文头里，解密方自己知道该怎么还原，
+ * 不需要用户记得"我当时压了没有"。
  */
 (function () {
   const enc = new TextEncoder();
@@ -23,9 +30,29 @@
 
   const MAGIC = [0x43, 0x44, 0x52, 0x56]; // CDRV
   const VER = 1;
+  const VER2 = 2;          // 带预处理标记
+  const PROC_NONE = 0;
+  const PROC_GZIP = 1;
   const SALT_LEN = 16;
   const IV_LEN = 12;
-  const HEADER_LEN = 4 + 1 + SALT_LEN + 4;
+  const HEADER_V1 = 4 + 1 + SALT_LEN + 4;
+  const HEADER_V2 = 4 + 1 + 1 + SALT_LEN + 4;
+
+  /* ---------- 预处理（压缩）----------
+   * 浏览器原生 CompressionStream，不引第三方库。
+   * 不可用时返回 null，调用方降级成原样 —— 不能因为环境不支持就传失败。 */
+  function canCompress() {
+    return typeof CompressionStream === 'function' && typeof DecompressionStream === 'function';
+  }
+  function gzip(blob) {
+    if (!canCompress()) return Promise.resolve(null);
+    return new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob()
+      .catch(() => null);
+  }
+  function gunzip(blob) {
+    if (!canCompress()) return Promise.reject(new Error('这个浏览器不支持解压'));
+    return new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).blob();
+  }
 
   function u32(n) {
     return new Uint8Array([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
@@ -93,19 +120,34 @@
   }
 
   /* 加密：File/Blob → Blob（密文容器） */
-  async function encryptBlob(blob, passphrase) {
+  /* 加密：File/Blob → Blob（密文容器）
+   *
+   * proc: 'auto'（默认，压了更小才压）| 'gzip'（一定压）| 'none'（不压）
+   * 返回 { blob, proc, saved } —— proc 要存进索引，saved 只是给界面看的。 */
+  async function encryptBlob(blob, passphrase, proc) {
+    proc = proc || 'auto';
+    let body = blob;
+    let code = PROC_NONE;
+
+    if (proc !== 'none' && canCompress()) {
+      const z = await gzip(blob);
+      // 已经压过的文件（zip/jpg/mp4）再压只会变大。
+      // 变大就存原样 —— 为了"看起来专业"而把文件撑大是纯亏。
+      if (z && z.size < blob.size) { body = z; code = PROC_GZIP; }
+    }
+
     const salt = rand(SALT_LEN);
     const key = await deriveKey(passphrase, salt, window.CloudCfg.crypto.iterations);
     const chunkSize = window.CloudCfg.crypto.chunkSize;
 
-    const total = blob.size;
+    const total = body.size;
     const chunks = Math.max(1, Math.ceil(total / chunkSize));
     const parts = [];
-    let outLen = HEADER_LEN;
+    let outLen = HEADER_V2;
 
     for (let i = 0; i < chunks; i++) {
       const start = i * chunkSize;
-      const buf = await blob.slice(start, Math.min(start + chunkSize, total)).arrayBuffer();
+      const buf = await body.slice(start, Math.min(start + chunkSize, total)).arrayBuffer();
       const iv = rand(IV_LEN);
       const sealed = new Uint8Array(
         await crypto.subtle.encrypt(
@@ -121,7 +163,8 @@
     const out = new Uint8Array(outLen);
     let p = 0;
     out.set(MAGIC, p); p += 4;
-    out[p++] = VER;
+    out[p++] = VER2;
+    out[p++] = code;
     out.set(salt, p); p += SALT_LEN;
     out.set(u32(chunkSize), p); p += 4;
     for (const c of parts) {
@@ -129,17 +172,34 @@
       out.set(u32(c.len), p); p += 4;
       out.set(c.sealed, p); p += c.sealed.length;
     }
-    return new Blob([out], { type: 'application/octet-stream' });
+    return {
+      blob: new Blob([out], { type: 'application/octet-stream' }),
+      proc: code,
+      saved: blob.size - body.size
+    };
   }
 
-  /* 解密：密文 ArrayBuffer → Blob */
+  /* 解密：密文 ArrayBuffer → Blob
+   *
+   * 按头里的 ver 分支：v1 没有预处理，v2 可能有 gzip。
+   * 老文件（v1）照样能开 —— 它们本来就没压过。 */
   async function decryptBuffer(raw, passphrase) {
     const b = new Uint8Array(raw);
     for (let i = 0; i < 4; i++) {
       if (b[i] !== MAGIC[i]) throw new Error('不是本云盘的密文文件（魔数不对）');
     }
-    if (b[4] !== VER) throw new Error('密文版本不支持：' + b[4]);
-    let p = 5;
+    const ver = b[4];
+    if (ver !== VER && ver !== VER2) throw new Error('密文版本不支持：' + ver);
+
+    let p, proc = PROC_NONE;
+    if (ver === VER2) {
+      proc = b[5];
+      if (proc !== PROC_NONE && proc !== PROC_GZIP) throw new Error('未知的预处理方式：' + proc);
+      p = 6;
+    } else {
+      p = 5;
+    }
+
     const salt = b.slice(p, p + SALT_LEN); p += SALT_LEN;
     const chunkSize = readU32(b, p); p += 4;
 
@@ -153,13 +213,16 @@
       const len = readU32(b, p); p += 4;
       if (p + len + 16 > b.length) throw new Error('密文被截断（第 ' + i + ' 块数据不完整）');
       const sealed = b.slice(p, p + len + 16); p += len + 16;
-      // subarray 直接给 crypto 用，避免再拷一份
       plain.push(
         await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: u32(i) }, key, sealed)
       );
       i++;
     }
-    return new Blob(plain, { type: 'application/octet-stream' });
+
+    let out = new Blob(plain, { type: 'application/octet-stream' });
+    // 先解密、后解压 —— 与加密时的顺序严格反过来
+    if (proc === PROC_GZIP) out = await gunzip(out);
+    return out;
   }
 
   /* 文件名等短元数据也加密，避免私有库/公开库里留下真实文件名 */
