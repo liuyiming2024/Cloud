@@ -52,6 +52,14 @@ rejected=false;
 try{ await B.importFromCode('/a.js'); }catch(e){ rejected=true; msg=e.message; }
 ok('加密网盘没就绪时明确报错', rejected && /就绪/.test(msg), msg);
 
+// 一致性：主页面匿名能用，Cloud.api 也必须能用。
+// 不一致的话，直接打开能用、嵌在 Code 里不能用，最难排查。
+const psrc=fs.readFileSync(path.join(ROOT,'js/pageapi.js'),'utf8');
+ok('pageapi 里匿名分支排在查账号之前（不认账号也能就绪）',
+   psrc.indexOf('isAnon()') < psrc.indexOf('window.CloudId.account()'));
+ok('pageapi 不再用 acc.uid（改用 ownerId）', !/acc\.uid/.test(psrc));
+ok('匿名走固定口令', /anonPass\(\)/.test(psrc));
+
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
 })().catch(e=>{console.error('崩了',e);process.exit(1)});
