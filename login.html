@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>登录 · Cloud Drive</title>
+<title>正在跳转登录 · Cloud Drive</title>
 <link rel="stylesheet" href="css/style.css">
 <script>
   (function () {
@@ -18,91 +18,60 @@
 
   <div class="top">
     <div class="grow">
-      <h1><span class="dot"></span>登录</h1>
-      <div class="sub">和 Chat、Code 是同一套账号。在一个地方登录，三个地方都认得你。</div>
+      <h1><span class="dot"></span>正在跳转…</h1>
+      <div class="sub">登录由全站统一的登录页负责，那边登完会自动回到这里。</div>
     </div>
-    <button id="theme" class="themebtn">🌗 深色</button>
-  </div>
-
-  <!-- 已经有登录态 -->
-  <div class="panel" id="hasSession" style="display:none">
-    <label>当前身份</label>
-    <div class="acct">
-      <div class="who">
-        <div class="nick" id="curNick">—</div>
-        <div class="src" id="curSrc">—</div>
-      </div>
-    </div>
-    <div style="margin-top:12px" class="row2">
-      <button id="useIt" class="primary">用这个身份继续</button>
-      <button id="switchAcct">换个账号</button>
-    </div>
-  </div>
-
-  <!-- 登录 -->
-  <div class="panel" id="loginBox">
-    <label for="nick">昵称</label>
-    <input id="nick" type="text" placeholder="你的昵称" autocomplete="username">
-    <div style="margin-top:10px">
-      <label for="pwd">密码</label>
-      <input id="pwd" type="password" placeholder="密码" autocomplete="current-password">
-    </div>
-    <div style="margin-top:12px">
-      <button id="loginGo" class="primary">登录</button>
-      <button id="toReg">注册新账号</button>
-    </div>
-    <div class="hint">密码只送到服务端做校验，本页不保存、也不接触任何人的密码摘要。</div>
-  </div>
-
-  <!-- 注册 -->
-  <div class="panel" id="regBox" style="display:none">
-    <label for="rNick">昵称</label>
-    <input id="rNick" type="text" placeholder="起一个，别人看得到" autocomplete="username">
-    <div class="hint">昵称唯一，且注册后不能改。</div>
-    <div style="margin-top:10px">
-      <label for="rPwd">密码</label>
-      <input id="rPwd" type="password" placeholder="至少 6 位" autocomplete="new-password">
-    </div>
-    <div style="margin-top:10px">
-      <label for="rPwd2">再输一次</label>
-      <input id="rPwd2" type="password" placeholder="确认密码" autocomplete="new-password">
-    </div>
-    <div class="warn danger" style="margin-top:12px">
-      <b>这个密码不绑定邮箱、不绑定手机，没有找回通道。</b>
-      忘了就是忘了。新账号还需要管理员审核通过后才能正常使用。
-    </div>
-    <div style="margin-top:12px">
-      <button id="regGo" class="primary">注册</button>
-      <button id="backLogin">返回登录</button>
-    </div>
-  </div>
-
-  <!-- 票据：在 Chat 申领，这里兑换，免输密码 -->
-  <div class="panel">
-    <details>
-      <summary>用票据登录（免输密码）</summary>
-      <p class="dim" style="font-size:13px;margin:10px 0">
-        在已登录的 Chat 里申领一串票据码，粘贴到这里兑换登录。
-        票据 5 分钟有效、只能用一次，且校验来源 —— 换一台机器就失效。
-        如果你已经登录了 Chat，直接打开本页就会自动认出你，不用兑换。
-      </p>
-      <input id="ticket" type="text" placeholder="粘贴票据码">
-      <div style="margin-top:10px"><button id="redeemGo">兑换</button></div>
-    </details>
   </div>
 
   <div class="panel">
-    <label>状态</label>
     <div id="log"></div>
+    <div style="margin-top:14px">
+      <button id="go" class="primary">现在就去登录</button>
+      <a href="index.html" style="margin-left:8px;font-size:13px;color:var(--dim)">直接匿名使用</a>
+    </div>
   </div>
 
-  <div style="text-align:center;margin-top:16px">
-    <a href="index.html" style="color:var(--dim);font-size:13px">← 回云盘</a>
+  <div class="panel">
+    <div class="warn">
+      <b>不登录也能用。</b>
+      没登录时传上去的东西站长能打开 —— 想保密就登录。
+      另外匿名身份只认这台浏览器，清了缓存就找不回来了。
+    </div>
   </div>
 
 </div>
 
+<script src="js/config.js"></script>
 <script src="js/auth.js"></script>
-<script src="js/login.js"></script>
+<script>
+(function () {
+  var box = document.getElementById('log');
+  function log(m, k) {
+    var d = document.createElement('div');
+    d.className = 'log-line' + (k ? ' ' + k : '');
+    d.textContent = m;
+    box.appendChild(d);
+  }
+  var btn = document.getElementById('go');
+  btn.addEventListener('click', function () {
+    window.CloudAuth.goLogin('index.html');
+  });
+
+  // 已经登录了就直接回主页，不用绕一圈
+  window.CloudAuth.load().then(function (SI) {
+    if (SI && SI.ready) {
+      return SI.ready.then(function (st) {
+        if (st && st.ok) {
+          log('已经登录了，正在回去…', 'ok');
+          setTimeout(function () { location.href = 'index.html'; }, 400);
+        } else {
+          log('还没登录，点上面的按钮去登录。');
+        }
+      });
+    }
+    log('还没登录，点上面的按钮去登录。');
+  });
+})();
+</script>
 </body>
 </html>
