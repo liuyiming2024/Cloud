@@ -1,60 +1,78 @@
-/* 登录态 / 跨应用身份 / 退出 回归
- * 这几个坑 Chat 与 Code 都踩过（E-047 / S-047），这里钉死。 */
+/* 统一登录页适配回归
+ *
+ * 全站只有 https://liuyiming2024.github.io/login.html 这一个登录页，
+ * 会话写在 wxlg_sb_token / wxlg_sb_uid（SiteIdentity 的键）。
+ * Cloud 不自己做登录，只负责认人 + 跳过去 + 退出。
+ *
+ * 这里钉死的是：认人不能认错、跳转地址不能送人到钓鱼站。
+ */
 const fs=require('fs'),path=require('path');
 const ROOT=process.argv[2];
 let pass=0,fail=0;
 const ok=(n,c,e)=>{c?(pass++,console.log('  ✅ '+n)):(fail++,console.log('  ❌ '+n+(e?' —— '+e:'')))};
 
-// 一个够用的 localStorage
 const store={};
 globalThis.localStorage={getItem:k=>(k in store?store[k]:null),setItem:(k,v)=>{store[k]=String(v)},removeItem:k=>{delete store[k]}};
 globalThis.crypto=require('crypto').webcrypto;
 globalThis.window=globalThis;
-globalThis.CloudCfg={crypto:{iterations:20000,chunkSize:4*1024*1024},simpleSalt:'test'};
+globalThis.location={href:'',pathname:'/Cloud/index.html',origin:'https://liuyiming2024.github.io'};
+globalThis.document={createElement:()=>({}),head:{appendChild:()=>{}}};
+globalThis.CloudCfg={crypto:{iterations:20000,chunkSize:4*1024*1024},simpleSalt:'test',
+  anonPass:'gEjKtd53fiG4dJ0nrrq9iFq1YZX11rCZ18h0jfUW'};
 new Function(fs.readFileSync(path.join(ROOT,'js/auth.js'),'utf8'))();
+new Function(fs.readFileSync(path.join(ROOT,'js/crypto.js'),'utf8'))();
 new Function(fs.readFileSync(path.join(ROOT,'js/identity.js'),'utf8'))();
 const A=globalThis.CloudAuth, I=globalThis.CloudId;
-const K=A.KEY;
+const U='wxlg_sb_uid', T='wxlg_sb_token';
 
 (async()=>{
-console.log('登录态 / 跨应用身份 / 退出');
+console.log('统一登录页适配');
 
-ok('初始无账号', A.uid()===null && I.account()===null);
+// 未登录
+ok('没登录时读不到身份', A.uid()===null);
+ok('没登录判定为匿名', I.isAnon()===true);
 
-// 场景一：只在 Chat 登过（Cloud 自己没登过）→ 借用态
-store[K.CHAT_TOK]='tok-chat'; store[K.CHAT_UID]='uid-111';
-ok('能沿用 Chat 的登录态（同源共享）', A.uid()==='uid-111');
-ok('沿用态被标记为来自 Chat', I.account().from==='Chat');
+// 在统一登录页登录 → 写 wxlg_sb_*
+store[T]='tok-1'; store[U]='uid-abc';
+ok('能认出统一登录页写的会话', A.uid()==='uid-abc');
+ok('认出后不再是匿名', I.isAnon()===false);
+ok('归属 = 账号 uid', I.ownerId()==='uid-abc');
 
-// 场景二：在 Cloud 退出。Chat 的会话我们无权删，只能拒绝沿用。
-A.dropSession();
-ok('退出后不再沿用 Chat（刷新不会"复活"）', A.uid()===null);
-ok('退出态被 account() 正确反映', I.account()===null);
-ok('退出不删 Chat 的数据（那是别人的会话）', store[K.CHAT_TOK]==='tok-chat');
+// 老版本 Cloud 自己登过的存量会话也要认（不丢人）
+delete store[U]; delete store[T];
+store['code_cloud_uid']='uid-old'; store['code_cloud_token']='tok-old';
+ok('也认老版本自己写的会话（存量不丢）', A.uid()==='uid-old');
+delete store['code_cloud_uid']; delete store['code_cloud_token'];
 
-// 场景三：在 Cloud 主动登录 → 两边都写，让 Chat 那边也认出这次登录
-A.setSession('tok-cloud','uid-222');
-ok('登录写自己的 key', store[K.CODE_TOK]==='tok-cloud');
-ok('登录同时写给 Chat（跨应用身份统一）', store[K.CHAT_TOK]==='tok-cloud');
-ok('登录后优先认自己的', A.uid()==='uid-222');
-ok('主动登录撤销了退出标记', !store[K.OPT_OUT]);
+// 退出
+store[T]='tok-1'; store[U]='uid-abc';
+await A.logout();
+ok('退出后读不到身份', A.uid()===null);
+ok('退出清掉了统一会话', !store[T] && !store[U]);
+ok('退出不带 SiteIdentity 也不报错（降级到本地清理）', true);
 
-// 场景四：再退出一次（这次是自己登的）
-A.dropSession();
-ok('退出清掉自己的 token', !store[K.CODE_TOK]);
-ok('退出后读不到任何身份', A.uid()===null);
+// 跳转地址
+store[T]=''; store[U]='';
+A.goLogin('index.html');
+const href=globalThis.location.href;
+ok('跳转到统一登录页', href.indexOf('https://liuyiming2024.github.io/login.html')===0, href);
+ok('带上了回跳参数', /[?&]next=/.test(href), href);
+ok('回跳目标是同源相对路径（不是外站）',
+   !/next=https?:\/\//.test(href.replace(/^.*next=/,'')), href);
 
-// 场景五：再次登录
-A.setSession('tok-new','uid-333');
-ok('再次登录恢复身份', A.uid()==='uid-333');
+// 站点有 SiteIdentity 时，走它的 goLogin
+globalThis.SiteIdentity={state:{id:'uid-si',ok:true},token:()=>'tok-si',
+  goLogin(n){ globalThis.location.href='SI:'+n; }};
+globalThis.window.SiteIdentity=globalThis.SiteIdentity;
+ok('有 SiteIdentity 时优先读它的 state', A.uid()==='uid-si');
+A.goLogin('index.html');
+ok('有 SiteIdentity 时走它的 goLogin', globalThis.location.href==='SI:index.html');
+ok('能取到昵称', A.nick()===null || typeof A.nick()==='string');
 
-// 后端地址单一真源
-ok('identity 复用 auth 的后端地址（不抄第二份）',
-   I && A.SB_URL && A.SB_URL.indexOf('supabase')>0);
-
-// key 派生在有账号后才可用
-const k=await I.derivePass('uid-333','2026-01-01T00:00:00Z',0);
-ok('有账号后能算出简单模式口令', typeof k==='string' && k.length>20);
+// 匿名口令与账号口令不混
+const anon=I.anonPass();
+const real=await I.derivePass('uid-abc','2026-01-01T00:00:00Z',0);
+ok('账号口令 ≠ 匿名固定口令', real!==anon);
 
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
