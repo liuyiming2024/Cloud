@@ -76,6 +76,25 @@
                   function () { clear(); return { via: 'local' }; });
   }
 
+  /* 走 RPC 函数层，不直接查表。
+   *
+   * 为什么不能直接 fetch rest/v1/users?... ：
+   *   那样是用 anon key 直连数据表，安全性完全压在 RLS 上 ——
+   *   RLS 一旦配置有偏差，任何人都能读到整张 users 表。
+   *   RPC 是 SECURITY DEFINER 的函数层，函数里自己决定返回什么，
+   *   不依赖表的 policy 配得对不对。
+   *
+   * SiteIdentity 在场就用它的 rpc（它管凭据、管错误处理）；
+   * 不在场就返回 null，让调用方降级 —— 绝不自己拼 URL 去查表。 */
+  function rpc(name, params) {
+    var s = SI();
+    if (s && typeof s.rpc === 'function') {
+      return s.rpc(name, params || {}).then(function (r) { return r; },
+                                            function () { return null; });
+    }
+    return Promise.resolve(null);
+  }
+
   /* 加载统一身份层。已加载则直接 resolve。 */
   function load(timeoutMs) {
     if (SI()) return Promise.resolve(SI());
@@ -100,7 +119,7 @@
 
   window.CloudAuth = {
     uid: uid, token: token, nick: nick,
-    goLogin: goLogin, logout: logout, load: load,
+    goLogin: goLogin, logout: logout, load: load, rpc: rpc,
     LOGIN_PAGE: LOGIN_PAGE,
     KEY: { UID: UID_KEY, TOK: TOK_KEY, OLD_UID: OLD_UID, OLD_TOK: OLD_TOK }
   };
