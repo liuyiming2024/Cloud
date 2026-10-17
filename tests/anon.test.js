@@ -27,7 +27,7 @@ ok('匿名口令是 config 里那把', I.anonPass()===CloudCfg.anonPass);
 
 // 匿名加密的文件，任何人（含站长）都能解 —— 这是它的设计目的
 const blob=new Blob([new Uint8Array([1,2,3,4,5])]);
-const sealed=await C.encryptBlob(blob, I.anonPass());
+const sealed=(await C.encryptBlob(blob, I.anonPass(), 'none')).blob;
 const back=await C.decryptBuffer(await sealed.arrayBuffer(), I.anonPass());
 ok('匿名文件用固定口令可解（站长能打开）', back.size===5);
 let wrong=false;
