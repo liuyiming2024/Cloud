@@ -69,6 +69,31 @@ A.goLogin('index.html');
 ok('有 SiteIdentity 时走它的 goLogin', globalThis.location.href==='SI:index.html');
 ok('能取到昵称', A.nick()===null || typeof A.nick()==='string');
 
+// E-1：注册时间只能走 RPC，绝不直连 users 表
+const idsrc=fs.readFileSync(path.join(ROOT,'js/identity.js'),'utf8');
+ok('identity.js 不再出现 rest/v1 表查询', !/rest\/v1\//.test(idsrc));
+ok('identity.js 不再硬编码 supabase 地址', !/supabase\.co/.test(idsrc));
+ok('identity.js 不再硬编码 publishable key', !/sb_publishable/.test(idsrc));
+ok('注册时间走 fetchCreatedAt（内部用 CloudAuth.rpc）',
+   /fetchCreatedAt/.test(idsrc) && /CloudAuth\.rpc/.test(idsrc));
+
+// RPC 不存在时必须降级成空，而不是报错或退回直连
+globalThis.SiteIdentity={state:{id:'uid-si',ok:true},token:()=>'tok-si',
+  rpc:()=>Promise.reject(new Error('function does not exist')),
+  goLogin(n){ globalThis.location.href='SI:'+n; }};
+const cat=await I.fetchCreatedAt('uid-si');
+ok('RPC 不存在时降级为空串（不报错、不直连）', cat==='');
+
+// RPC 存在时正常取到
+globalThis.SiteIdentity.rpc=()=>Promise.resolve({created_at:'2026-01-01T00:00:00Z'});
+ok('RPC 可用时能取到注册时间',
+   await I.fetchCreatedAt('uid-si')==='2026-01-01T00:00:00Z');
+
+// 没有 CloudAuth.rpc 时也要安全降级
+delete globalThis.window.CloudAuth.rpc;
+ok('没有 rpc 能力时安全返回空',
+   await I.fetchCreatedAt('uid-si')==='');
+
 // 匿名口令与账号口令不混
 const anon=I.anonPass();
 const real=await I.derivePass('uid-abc','2026-01-01T00:00:00Z',0);
