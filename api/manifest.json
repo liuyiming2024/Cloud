@@ -29,6 +29,7 @@
     "Cloud.api.channel()          当前走哪条通道：worker（快，秒级）／actions（慢，要等 Actions）",
     "Cloud.api.version()          契约版本号（属性），改接口必须跟着 bump，改接口必须跟着 bump",
     "Cloud.api.on('change', fn)   订阅变更，返回取消订阅的函数",
+    "Cloud.api.upload(file,name,proc) 第三参：'auto'（默认压）|'gzip'|'none'",
     "Cloud.api.upload(file,name,proc) 第三参：'auto'（默认压）|'gzip'|'none'"
   ],
   "limits": {
@@ -71,5 +72,13 @@
     "howCodeCallsCloud": "Code 用同源隐藏 iframe 加载本页，直接访问 contentWindow.Cloud.api",
     "howCloudCallsCode": "本页嵌在 Code 里时，可用 CloudBridge.importFromCode(path) 把小文件转存进来",
     "selfCheck": "node scripts/check-bridge.js . —— 核对 Code 会调的方法是否都还在"
+  },
+  "pro": {
+    "note": "专业档才有，勾选后生效。都要额外时间，所以不给标准档。",
+    "zip": "先压缩再加密。压不动的内容自动存原样。方式写在密文头，下载时自动还原。",
+    "volume": "切成 8MB 一卷分别存。单卷失败只重传那一卷。丢任何一卷整份都解不开 —— 换来的是重传代价小，不是容错。",
+    "verify": "存完后重新解密算指纹比对。真校验：只看大小没意义，内容坏了大小可以不变。",
+    "manifest": "导出指纹清单，事后可查内容有没有被动过。",
+    "export": "批量导出为 ZIP（store 模式，不压缩 —— 内容已加密，压不动）。"
   }
 }
