@@ -18,9 +18,10 @@
  */
 (function () {
   // 与 Chat / Code 共用的会话键。三个页面都在 liuyiming2024.github.io 下，同源共享 localStorage
+  // 全站统一会话键（SiteIdentity 用的就是这两个）
   var CHAT_UID = 'wxlg_sb_uid';
   var CHAT_TOK = 'wxlg_sb_token';
-  var CODE_UID = 'code_cloud_uid';
+  var CODE_UID = 'code_cloud_uid';   // 老版本 Cloud 自己写的，保留读取
   var CODE_TOK = 'code_cloud_token';
 
   // 后端地址从 auth.js 拿（那边是唯一真源）。auth.js 没加载时退回这里，
@@ -49,15 +50,14 @@
    * 优先走 CloudAuth 的判定（它会尊重"主动退出过"这个标记），
    * 取不到再按老办法读，保证单独引入本文件时也能用。 */
   function account() {
-    var uid = '', tok = '', from = '';
+    var uid = '', tok = '', from = '全站统一账号';
     if (window.CloudAuth) {
+      // 走适配层：有 SiteIdentity 就用它的判定，别自己再读一遍
       uid = window.CloudAuth.uid() || '';
       tok = window.CloudAuth.token() || '';
-      from = ls(CODE_UID) ? 'Cloud / Code' : 'Chat';
     } else {
-      uid = ls(CODE_UID) || ls(CHAT_UID) || '';
-      tok = ls(CODE_TOK) || ls(CHAT_TOK) || '';
-      from = ls(CODE_UID) ? 'Cloud / Code' : 'Chat';
+      uid = ls(CHAT_UID) || ls(CODE_UID) || '';
+      tok = ls(CHAT_TOK) || ls(CODE_TOK) || '';
     }
     if (!uid) return null;
     return { uid: uid, token: tok, from: from, short: uid.slice(0, 8) };
