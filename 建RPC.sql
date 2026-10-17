@@ -14,7 +14,7 @@ returns timestamptz
 language sql
 stable
 security definer
-set search_path = public
+set search_path = public, extensions, pg_temp
 as $$
   -- 只允许查自己。别人问就给 null，不报错 —— 报错本身也是一种信息泄露。
   select created_at from users
