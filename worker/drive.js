@@ -72,7 +72,7 @@ export default {
         idx.files = idx.files.filter((f) => f.id !== id).concat([{
           id, name: meta.name || '', size: meta.size || 0,
           cipher: body.byteLength, store, km: meta.km || 'anon',
-          kid: meta.kid || '', fp: meta.fp || '', oid,
+          kid: meta.kid || '', fp: meta.fp || '', proc: meta.proc || 0, oid,
           at: new Date().toISOString()
         }]);
         await gh.writeIndex(idx);
