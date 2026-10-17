@@ -20,6 +20,7 @@
     pass: '',             // 当前生效的口令
     kid: '',              // 当前口令的编号
     files: [],
+    picked: new Set(),    // 批量导出勾选的文件
     keys: []              // 登记表里属于本账号的记录（含历史轮次）
   };
 
@@ -196,7 +197,15 @@
   /* 专业模式才压缩。
    * 不是标准模式不能压 —— 是压缩要花时间，标准模式的定位就是"快"，
    * 为了省一点空间让人多等，不值。 */
-  function procMode() { return state.mode === 'pro' ? 'auto' : 'none'; }
+  function procMode() {
+    if (state.mode !== 'pro') return 'none';
+    return ($('#optZip') && $('#optZip').checked) ? 'auto' : 'none';
+  }
+  function volSize() {
+    if (state.mode !== 'pro') return 0;
+    const b = $('#optVol');
+    return (b && b.checked) ? 8 * 1024 * 1024 : 0;  // 0 = 不分卷
+  }
 
   function b64json(o) {
     return btoa(unescape(encodeURIComponent(JSON.stringify(o))));
@@ -296,6 +305,19 @@
       if (state.mode === 'pro') state.pass = state.proPass;
     });
 
+    $('#btnManifest').addEventListener('click', exportManifest);
+    $('#btnExport').addEventListener('click', exportZip);
+    $('#btnVerify').addEventListener('click', async () => {
+      if (!state.files.length) { log('目录是空的', 'err'); return; }
+      for (const f of state.files) {
+        if (f.volN > 1 && f.vol !== 0) continue;
+        let nm = f.id;
+        try { nm = await window.CloudCrypto.decryptText(f.name, state.pass); } catch (e) {}
+        const pass = await passForKid(f.kid || state.kid, f.km);
+        await verifyOne(f.vid || f.id, nm, f.fp || '', pass);
+      }
+    });
+
     $('#pick').addEventListener('change', () => renderPicked());
     $('#upload').addEventListener('click', doUpload);
     $('#refresh').addEventListener('click', loadList);
@@ -303,6 +325,166 @@
     detectAccount();
     if (state.mode === 'simple') ensureKey();
     log('填好令牌就能用了。');
+  }
+
+  /* 存一份密文。分卷时切成若干卷分别上传 ——
+   * 每卷一个 job，单卷失败只重传那一卷。
+   * 返回最后一卷的回执。 */
+  async function storeSealed(sealed, id, metaBase, onVol) {
+    const vs = volSize();
+    const vols = vs > 0 ? window.CloudPro.split(sealed, vs) : [sealed];
+    const vid = vols.length > 1 ? id : '';
+    if (vols.length > 1) log('  分成 ' + vols.length + ' 卷');
+
+    let last = null;
+    for (let vi = 0; vi < vols.length; vi++) {
+      const vjob = randId();
+      const entryId = vols.length > 1 ? (id + '#' + vi) : id;
+      const meta = Object.assign({}, metaBase, {
+        name: await window.CloudCrypto.encryptText(
+          vols.length > 1
+            ? (metaBase._plain + ' [' + (vi + 1) + '/' + vols.length + ']')
+            : metaBase._plain,
+          state.pass),
+        vid: vid, vol: vi, volN: vols.length,
+        // 指纹只在第 0 卷记 —— 分卷后单卷算不出整份的指纹
+        fp: vi === 0 ? metaBase.fp : ''
+      });
+      delete meta._plain;
+
+      if (window.CloudWorker.on()) {
+        const r = await window.CloudWorker.put(window.CloudId.ownerId(), entryId, meta, vols[vi]);
+        last = { store: r.store || 'git', cipher: r.cipher };
+      } else {
+        const b64 = await window.CloudApi.blobToB64(vols[vi], (done, total) => {
+          if (done === total) log('  编码完成');
+        });
+        await window.CloudApi.write(window.CloudCfg.inbox + '/' + vjob + '.bin', b64, '暂存 ' + vjob);
+        await window.CloudApi.dispatch('put', vjob, { id: entryId, meta: b64json(meta) });
+        last = await window.CloudApi.waitJob(vjob, (waited) => {
+          if (waited % 15000 < 3000) log('  已等 ' + Math.round(waited / 1000) + ' 秒');
+        });
+      }
+      if (onVol) onVol(vi + 1, vols.length);
+    }
+    return { r: last, vols: vols.length };
+  }
+
+  /* ---------- 专业档开关 ---------- */
+  function verifyOn() {
+    if (state.mode !== 'pro') return false;
+    const b = $('#optVerify');
+    return !!(b && b.checked);
+  }
+
+  /* 下载并解密一个文件（含分卷拼回） */
+  async function fetchPlain(rec) {
+    const pass = await passForKid((rec && rec.kid) || state.kid, rec && rec.km);
+    let buf;
+    const volN = (rec && rec.volN) || 1;
+    if (volN > 1) {
+      // 分卷：按序把所有卷拉回来拼成一整份密文
+      log('  分卷文件，取 ' + volN + ' 卷…');
+      const parts = [];
+      for (let i = 0; i < volN; i++) {
+        const vid = (rec.vid || rec.id.replace(/#\d+$/, '')) + '#' + i;
+        parts.push(await fetchRaw((rec.vid || rec.id.replace(/#\d+$/, '')) + '-' + i, vid, rec));
+      }
+      const all = new Uint8Array(parts.reduce((a, x) => a + x.byteLength, 0));
+      let p = 0;
+      for (const x of parts) { all.set(new Uint8Array(x), p); p += x.byteLength; }
+      buf = all.buffer;
+    } else {
+      buf = await fetchRaw(rec.id, rec.id, rec);
+    }
+    return window.CloudCrypto.decryptBuffer(buf, pass);
+  }
+
+  /* 从当前通道拿一卷的原始密文 */
+  async function fetchRaw(id, volId, rec) {
+    if (window.CloudWorker.on()) {
+      return window.CloudWorker.get((rec && rec.oid) || window.CloudId.ownerId(), volId);
+    }
+    const job = randId();
+    await window.CloudApi.dispatch('get', job, {
+      id: volId,
+      meta: b64json({ oid: (rec && rec.oid) || window.CloudId.ownerId() })
+    });
+    const r = await window.CloudApi.waitJob(job, null, 15 * 60 * 1000);
+    if (r.channel === 'release') {
+      const resp = await fetch(r.url);
+      if (!resp.ok) throw new Error('直链下载失败：HTTP ' + resp.status);
+      return resp.arrayBuffer();
+    }
+    const raw = await window.CloudApi.readRaw(r.path);
+    if (!raw) throw new Error('暂存区里读不到回传文件');
+    await window.CloudApi.remove(r.path, '清理下载暂存').catch(() => {});
+    return raw;
+  }
+
+  /* 校验：重新解密一遍算指纹，和记下的比对。
+     这是真校验 —— 只看大小对不对没意义，内容坏了大小可以不变。 */
+  async function verifyOne(id, name, wantFp, pass) {
+    try {
+      log('  校验中：' + name);
+      const rec = state.files.find((x) => x.id === id || x.vid === id) || { id: id };
+      const plain = await fetchPlain(rec);
+      const got = await window.CloudCrypto.fingerprint(plain, pass);
+      if (got === wantFp) log('  校验通过：' + name, 'ok');
+      else log('  校验不一致！' + name + '（内容可能被改动过）', 'err');
+    } catch (e) {
+      log('  校验失败：' + name + ' —— ' + e.message, 'err');
+    }
+  }
+
+  /* 导出校验清单：把当前目录的指纹写成文本文件 */
+  async function exportManifest() {
+    if (!state.files.length) { log('目录是空的，没什么可导出', 'err'); return; }
+    const rows = [];
+    for (const f of state.files) {
+      if (f.volN > 1 && f.vol !== 0) continue;   // 分卷只列第 0 卷那一条
+      let nm = f.id;
+      try { nm = await window.CloudCrypto.decryptText(f.name, state.pass); } catch (e) {}
+      rows.push({ fp: f.fp || '', size: f.size || 0, name: nm });
+    }
+    const text = window.CloudPro.manifestText(rows);
+    save(new Blob([text], { type: 'text/plain;charset=utf-8' }), '校验清单.txt');
+    log('校验清单已导出（' + rows.length + ' 条）', 'ok');
+  }
+
+  /* 批量导出：逐个解密，打包成 zip */
+  async function exportZip() {
+    const picked = state.files.filter((f) => state.picked.has(f.id || f.vid));
+    const list = picked.length ? picked : state.files.filter((f) => !(f.volN > 1 && f.vol !== 0));
+    if (!list.length) { log('没有可导出的文件', 'err'); return; }
+    const btn = $('#btnExport');
+    btn.disabled = true;
+    const entries = [];
+    let bad = 0;
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i];
+      let nm = f.id;
+      try { nm = await window.CloudCrypto.decryptText(f.name, state.pass); } catch (e) {}
+      log('  打包 ' + (i + 1) + '/' + list.length + '：' + nm);
+      try {
+        entries.push({ name: nm, blob: await fetchPlain(f) });
+      } catch (e) {
+        bad++; log('  跳过：' + nm + ' —— ' + e.message, 'err');
+      }
+    }
+    if (!entries.length) { btn.disabled = false; return; }
+    const zip = await window.CloudPro.zipStore(entries);
+    save(zip, '导出.zip');
+    log('已打包 ' + entries.length + ' 个文件' + (bad ? '，' + bad + ' 个失败' : ''), 'ok');
+    btn.disabled = false;
+  }
+
+  function save(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
 
   /* ---------- 上传 ---------- */
@@ -334,6 +516,8 @@
         log('加密中：' + f.name);
         const enc = await window.CloudCrypto.encryptBlob(f, state.pass, procMode());
         const sealed = enc.blob;
+        log('  密文 ' + fmt(sealed.size) + '（明文 ' + fmt(f.size) +
+            (enc.saved > 0 ? '，压缩省了 ' + fmt(enc.saved) : '') + '）');
 
         const fp = await window.CloudCrypto.fingerprint(f, state.pass);
         if (known.indexOf(fp) >= 0) {
@@ -342,40 +526,22 @@
         }
         known.push(fp);
 
-        log('  密文 ' + fmt(sealed.size) + '（明文 ' + fmt(f.size) + '）');
-        const job = randId();
-        const b64 = await window.CloudApi.blobToB64(sealed, (done, total) => {
-          if (done % (12 * 1024 * 1024) < 3 * 1024 * 1024 || done === total) {
-            log('  编码 ' + Math.round((done / total) * 100) + '%');
-          }
-        });
+        const out = await storeSealed(sealed, id, {
+          _plain: f.name,
+          size: f.size,
+          km: window.CloudId.isAnon() ? 'anon' : state.mode,
+          kid: state.kid,
+          fp: fp,
+          proc: enc.proc,
+          oid: window.CloudId.ownerId()
+        }, (i, n) => { if (n > 1) log('  第 ' + i + '/' + n + ' 卷已存入'); });
 
-        log('写入公开暂存区…');
-        await window.CloudApi.write(window.CloudCfg.inbox + '/' + job + '.bin', b64, '暂存 ' + job);
-
-        log('通知 Actions 搬运…');
-        await window.CloudApi.dispatch('put', job, {
-          id: id,
-          meta: b64json({
-            name: await window.CloudCrypto.encryptText(f.name, state.pass),
-            size: f.size,
-            km: window.CloudId.isAnon() ? 'anon' : state.mode,
-            kid: state.kid,
-            fp: fp,
-            proc: enc.proc,
-            oid: window.CloudId.ownerId()
-          })
-        });
-
-        log('等搬运回执…');
-        const r = await window.CloudApi.waitJob(job, (waited) => {
-          if (waited % 15000 < 3000) log('  已等 ' + Math.round(waited / 1000) + ' 秒');
-        });
-        if (r.dup) {
+        if (out.r && out.r.dup) {
           log('跳过：' + f.name + '（存储里已经有完全一样的内容，服务端拦下了）', 'err');
         } else {
-          log('已存入：' + f.name + '（' + r.store + ' 通道，密文 ' + fmt(r.cipher) + '）', 'ok');
+          log('已存入：' + f.name + (out.vols > 1 ? '（' + out.vols + ' 卷）' : ''), 'ok');
         }
+        if (verifyOn()) await verifyOne(id, f.name, fp, state.pass);
       } catch (e) {
         log('失败：' + f.name + ' —— ' + e.message, 'err');
       }
@@ -434,6 +600,7 @@
 
     for (const f of fs) {
       try {
+        const id = randId();
         log('加密中：' + f.name);
         const enc = await window.CloudCrypto.encryptBlob(f, state.pass, procMode());
         const sealed = enc.blob;
@@ -441,18 +608,24 @@
         if (known.indexOf(fp) >= 0) { log('跳过：' + f.name + '（已经有了）', 'err'); continue; }
         known.push(fp);
 
-        const r = await window.CloudWorker.put(oid, randId(), {
-          name: await window.CloudCrypto.encryptText(f.name, state.pass),
+        const out = await storeSealed(sealed, id, {
+          _plain: f.name,
           size: f.size,
           km: window.CloudId.isAnon() ? 'anon' : state.mode,
           kid: state.kid,
-          fp: fp
-        }, sealed);
-        log('已存入：' + f.name + '（密文 ' + fmt(r.cipher) + '）', 'ok');
+          fp: fp,
+          proc: enc.proc,
+          oid: window.CloudId.ownerId()
+        }, (i, n) => { if (n > 1) log('  第 ' + i + '/' + n + ' 卷已存入'); });
+
+        log('已存入：' + f.name + (out.vols > 1 ? '（' + out.vols + ' 卷）' : '') +
+            '（密文 ' + fmt(sealed.size) + '）', 'ok');
+        if (verifyOn()) await verifyOne(id, f.name, fp, state.pass);
       } catch (e) {
-        log('失败：' + f.name + ' —— ' + e.message, 'err');
+        log('失败：' + e.message, 'err');
       }
     }
+
     $('#upload').disabled = false;
     $('#pick').value = '';
     renderPicked();
@@ -497,18 +670,31 @@
       box.innerHTML = '<div class="dim">还没有文件</div>';
       return;
     }
-    box.innerHTML = state.files.map((f) => {
+    // 分卷文件只显示代表那一条（第 0 卷），否则一个文件会占好几行
+    const shown = state.files.filter((f) => !(f.volN > 1 && f.vol !== 0));
+    box.innerHTML = shown.map((f) => {
       let shown = '（口令不对或已损坏）';
       try { shown = state.pass ? window.CloudCrypto.decryptText(f.name, state.pass) : '🔒 加密文件名'; } catch (e) {}
       const tag = f.km === 'pro' ? '<span class="kid">专业</span>' : '';
-      return '<div class="row" data-id="' + esc(f.id) + '">' +
-        '<span class="nm">' + esc(shown) + ' ' + tag + '</span>' +
+      const vol = f.volN > 1 ? '<span class="kid">' + f.volN + ' 卷</span>' : '';
+      const key = f.vid || f.id;
+      const chk = state.mode === 'pro'
+        ? '<input type="checkbox" class="pk"' + (state.picked.has(key) ? ' checked' : '') + '>'
+        : '';
+      return '<div class="row" data-id="' + esc(f.id) + '" data-key="' + esc(key) + '">' +
+        '<span class="nm">' + chk + ' ' + esc(shown) + ' ' + tag + ' ' + vol + '</span>' +
         '<span class="sz">' + fmt(f.size || 0) + '</span>' +
         '<span class="at">' + esc((f.at || '').slice(0, 10)) + '</span>' +
         '<button class="dl">下载</button>' +
         '<button class="rm">删除</button>' +
         '</div>';
     }).join('');
+    box.querySelectorAll('.pk').forEach((c) =>
+      c.addEventListener('change', () => {
+        const k = c.closest('.row').dataset.key;
+        c.checked ? state.picked.add(k) : state.picked.delete(k);
+      })
+    );
     box.querySelectorAll('.dl').forEach((b) =>
       b.addEventListener('click', () => doDownload(b.closest('.row').dataset.id))
     );
@@ -570,9 +756,21 @@
   async function doRemove(id) {
     if (window.CloudWorker.on()) return doRemoveW(id);
     const rec = state.files.find((x) => x.id === id);
+    // 分卷：连带删掉所有卷，不然会留下没人能打开的残卷
+    if (rec && rec.volN > 1 && rec.vid) {
+      const all = state.files.filter((x) => x.vid === rec.vid);
+      for (const v of all) await removeOne(v);
+      loadList();
+      return;
+    }
     let nm = id;
     if (rec) { try { nm = window.CloudCrypto.decryptText(rec.name, await passForKid(rec.kid || state.kid, rec.km)); } catch (e) {} }
-    if (!confirm('删除「' + nm + '」？删掉之后没有任何找回的办法。')) return;
+  }
+  async function removeOne(rec) {
+    const id = rec.id;
+    let nm = id;
+    try { nm = window.CloudCrypto.decryptText(rec.name, await passForKid(rec.kid || state.kid, rec.km)); } catch (e) {}
+    if (state._noConfirm !== true && !confirm('删除「' + nm + '」？删掉之后没有任何找回的办法。')) return false;
     try {
       const job = randId();
       await window.CloudApi.dispatch('del', job, {
@@ -581,9 +779,10 @@
       });
       await window.CloudApi.waitJob(job);
       log('已删除：' + nm, 'ok');
-      loadList();
+      return true;
     } catch (e) {
       log('删除失败：' + e.message, 'err');
+      return false;
     }
   }
 
