@@ -54,22 +54,25 @@
       if (!P.token) { P.ready = false; P.reason = '没有访问令牌（先在页面上填一次）'; return false; }
     }
 
-    const acc = window.CloudId.account();
-    if (!acc) {
-      // 专业模式没账号也能用，但必须有口令
-      if (P.pass) { P.ready = true; P.reason = null; return true; }
-      P.ready = false;
-      P.reason = '没识别到账号。去登录，或调 Cloud.api.unlock(口令) 走专业模式';
-      return false;
+    // 匿名分支必须放在查账号**之前**：
+    // 主页面匿名时是能用的（固定口令），若这里不认，
+    // Code 通过 iframe 调就会报"没识别到账号"——同一个账号体系，
+    // 直接打开能用、嵌在 Code 里不能用，这种不一致最难排查。
+    if (window.CloudId.isAnon()) {
+      P.pass = window.CloudId.anonPass();
+      P.kid = await window.CloudId.keyId(P.pass);
+      P.ready = true;
+      P.reason = null;
+      return true;
     }
 
     if (P.pass) { P.ready = true; P.reason = null; return true; }
 
     // 简单模式：现算
     try {
-      const createdAt = await window.CloudId.fetchCreatedAt(acc.uid);
+      const createdAt = await window.CloudId.fetchCreatedAt(window.CloudId.ownerId());
       const round = parseInt(lsGet('cloud_drive_round', '0'), 10);
-      P.pass = await window.CloudId.derivePass(acc.uid, createdAt, round);
+      P.pass = await window.CloudId.derivePass(window.CloudId.ownerId(), createdAt, round);
       P.kid = await window.CloudId.keyId(P.pass);
       P.ready = true;
       P.reason = null;
