@@ -193,6 +193,11 @@
     return false;
   }
 
+  /* 专业模式才压缩。
+   * 不是标准模式不能压 —— 是压缩要花时间，标准模式的定位就是"快"，
+   * 为了省一点空间让人多等，不值。 */
+  function procMode() { return state.mode === 'pro' ? 'auto' : 'none'; }
+
   function b64json(o) {
     return btoa(unescape(encodeURIComponent(JSON.stringify(o))));
   }
@@ -327,7 +332,8 @@
       const id = randId();
       try {
         log('加密中：' + f.name);
-        const sealed = await window.CloudCrypto.encryptBlob(f, state.pass);
+        const enc = await window.CloudCrypto.encryptBlob(f, state.pass, procMode());
+        const sealed = enc.blob;
 
         const fp = await window.CloudCrypto.fingerprint(f, state.pass);
         if (known.indexOf(fp) >= 0) {
@@ -356,6 +362,7 @@
             km: window.CloudId.isAnon() ? 'anon' : state.mode,
             kid: state.kid,
             fp: fp,
+            proc: enc.proc,
             oid: window.CloudId.ownerId()
           })
         });
@@ -428,7 +435,8 @@
     for (const f of fs) {
       try {
         log('加密中：' + f.name);
-        const sealed = await window.CloudCrypto.encryptBlob(f, state.pass);
+        const enc = await window.CloudCrypto.encryptBlob(f, state.pass, procMode());
+        const sealed = enc.blob;
         const fp = await window.CloudCrypto.fingerprint(f, state.pass);
         if (known.indexOf(fp) >= 0) { log('跳过：' + f.name + '（已经有了）', 'err'); continue; }
         known.push(fp);
