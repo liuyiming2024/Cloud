@@ -24,8 +24,10 @@ window.CloudCfg = {
   worker: '',
 
   crypto: {
-    // PBKDF2 迭代次数。改了会导致旧文件解不开
+    // 标准档：PBKDF2 25 万次。改了会导致旧文件解不开
     iterations: 250000,
+    // 专业档：PBKDF2 100 万次，慢 4 倍，代价是每次开文件要多等一两秒
+    proIterations: 1000000,
     chunkSize: 4 * 1024 * 1024 // 分块 4MB，避免大文件一次性进内存
   },
 
