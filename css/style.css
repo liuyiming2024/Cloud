@@ -224,3 +224,15 @@ code {
 .top { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 4px; }
 .top .grow { flex: 1; }
 .themebtn { padding: 6px 10px; font-size: 12px; }
+
+/* ---------- 勾选 ---------- */
+.cb {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 13px; color: var(--text);
+  margin: 6px 0; cursor: pointer;
+}
+.cb input { width: 15px; height: 15px; accent-color: var(--accent); }
+
+/* ---------- 列表多选 ---------- */
+.row.pick { background: var(--panel2); }
+.row input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); }
