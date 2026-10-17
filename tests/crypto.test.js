@@ -13,7 +13,7 @@ const C=globalThis.CloudCrypto, I=globalThis.CloudId;
 console.log('加密 / 防重 / key 唯一性回归');
 const data=new Uint8Array(300*1024); for(let i=0;i<data.length;i++)data[i]=(i*7+3)&255;
 const plain=new Blob([data]);
-const sealed=await C.encryptBlob(plain,'p1');
+const sealed=(await C.encryptBlob(plain,'p1','none')).blob;
 const back=await C.decryptBuffer(await sealed.arrayBuffer(),'p1');
 const bu=new Uint8Array(await back.arrayBuffer());
 ok('往返一致',bu.length===data.length&&bu.every((v,i)=>v===data[i]));
@@ -23,7 +23,7 @@ let t=false; const full=new Uint8Array(await sealed.arrayBuffer());
 try{await C.decryptBuffer(full.slice(0,full.length-40).buffer,'p1')}catch(e){t=true}
 ok('截断必报错',t);
 const big=new Blob([new Uint8Array(9*1024*1024)]);
-ok('多块(9MB)往返',(await C.decryptBuffer(await (await C.encryptBlob(big,'p1')).arrayBuffer(),'p1')).size===big.size);
+ok('多块(9MB)往返',(await C.decryptBuffer(await (await (await C.encryptBlob(big,'p1','none')).blob.arrayBuffer()),'p1')).size===big.size);
 // 指纹
 const f1=await C.fingerprint(plain,'p1'), f2=await C.fingerprint(plain,'p1');
 ok('指纹可复现（同一内容同一口令）',f1===f2);
@@ -51,6 +51,43 @@ ok('编号不含 key 本身（单向）',!i0.includes(k0.slice(0,10))&&k0.length
 let found=null;
 for(let r=0;r<=5;r++){const p=await I.derivePass('uid-aaa','2026-01-01T00:00:00Z',r);if(await I.keyId(p)===i1){found=p;break}}
 ok('按编号能重算出旧轮次的 key（老文件仍可解）',found===k1);
+// ---- 压缩（专业档的额外能力）----
+const canZip = typeof CompressionStream === 'function';
+// 高度可压缩的文本
+const text = new Blob([new TextEncoder().encode('ab'.repeat(200000))]);
+const ez = await C.encryptBlob(text, 'p1', 'auto');
+if (canZip) {
+  ok('可压缩内容确实被压小了', ez.saved > 0, '省了 '+ez.saved);
+  ok('压缩标记写进密文头（proc=1）', ez.proc === 1);
+  const tb = await C.decryptBuffer(await ez.blob.arrayBuffer(), 'p1');
+  ok('压缩后往返一致', tb.size === text.size &&
+     Buffer.from(await tb.arrayBuffer()).equals(Buffer.from(await text.arrayBuffer())));
+  // 不可压缩内容（随机字节）→ 自动不压
+  const rndU8 = new Uint8Array(100000);
+for (let i = 0; i < rndU8.length; i += 65536) {
+  crypto.getRandomValues(rndU8.subarray(i, Math.min(i + 65536, rndU8.length)));
+}
+const rnd = new Blob([rndU8]);
+  const er = await C.encryptBlob(rnd, 'p1', 'auto');
+  ok('压不动的内容自动存原样（不撑大文件）', er.proc === 0 && er.saved === 0);
+  const rb = await C.decryptBuffer(await er.blob.arrayBuffer(), 'p1');
+  ok('未压缩内容往返一致', rb.size === rnd.size);
+}
+// 显式 none
+const en = await C.encryptBlob(text, 'p1', 'none');
+ok('proc=none 时不压缩', en.proc === 0 && en.saved === 0);
+const nb = await C.decryptBuffer(await en.blob.arrayBuffer(), 'p1');
+ok('proc=none 往返一致', nb.size === text.size);
+
+// 篡改 proc 字节必须报错，不能静默产出坏数据
+let badProc = false;
+try {
+  const full2 = new Uint8Array(await ez.blob.arrayBuffer());
+  full2[5] = 9;   // 未知预处理方式
+  await C.decryptBuffer(full2.buffer, 'p1');
+} catch (e) { badProc = /预处理/.test(e.message); }
+ok('未知预处理方式被识别并报错', badProc);
+
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
 })().catch(e=>{console.error('崩了',e);process.exit(1)});
