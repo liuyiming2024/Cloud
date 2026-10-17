@@ -493,10 +493,10 @@
       let shown = '（口令不对或已损坏）';
       try { shown = state.pass ? window.CloudCrypto.decryptText(f.name, state.pass) : '🔒 加密文件名'; } catch (e) {}
       const tag = f.km === 'pro' ? '<span class="kid">专业</span>' : '';
-      return '<div class="row" data-id="' + f.id + '">' +
+      return '<div class="row" data-id="' + esc(f.id) + '">' +
         '<span class="nm">' + esc(shown) + ' ' + tag + '</span>' +
         '<span class="sz">' + fmt(f.size || 0) + '</span>' +
-        '<span class="at">' + (f.at || '').slice(0, 10) + '</span>' +
+        '<span class="at">' + esc((f.at || '').slice(0, 10)) + '</span>' +
         '<button class="dl">下载</button>' +
         '<button class="rm">删除</button>' +
         '</div>';
