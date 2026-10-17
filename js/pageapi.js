@@ -21,6 +21,10 @@
   };
 
   function lsGet(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }
+  /* 有后端就走后端：不用等 Actions 跑一趟，也不用本地令牌。
+     对 Code 那种"藏在 iframe 里当模块用"的场景尤其重要 ——
+     那边一次调用卡几十秒，界面就废了。 */
+  function viaWorker() { return !!(window.CloudWorker && window.CloudWorker.on()); }
 
   function emit() {
     P.listeners.slice().forEach((fn) => {
@@ -45,8 +49,10 @@
 
   /* 把口令准备好：专业模式等 unlock，简单模式自己算 */
   async function ensure() {
-    P.token = lsGet(window.CloudCfg.tokenKey, '');
-    if (!P.token) { P.ready = false; P.reason = '没有访问令牌（先在页面上填一次）'; return false; }
+    if (!viaWorker()) {
+      P.token = lsGet(window.CloudCfg.tokenKey, '');
+      if (!P.token) { P.ready = false; P.reason = '没有访问令牌（先在页面上填一次）'; return false; }
+    }
 
     const acc = window.CloudId.account();
     if (!acc) {
@@ -76,6 +82,14 @@
   }
 
   const api = {
+    /* 契约版本。Code 的 drive.js 靠它判断能不能用 ——
+       接口一变但没 bump，那边就会调到不存在的方法，报"没有这个方法"。
+       所以改接口必须跟着改这个数。 */
+    version: 2,
+
+    /* 走哪条通道：后端（快）还是 Actions（慢） */
+    channel: () => (viaWorker() ? 'worker' : 'actions'),
+
     /* 是否可用 */
     ready: () => P.ready,
     /* 不可用时说明原因，可用时返回 null */
@@ -101,6 +115,10 @@
     /* 目录 */
     list: async function () {
       if (!await ensure()) throw new Error(P.reason);
+      if (viaWorker()) {
+        const r = await window.CloudWorker.list(window.CloudId.ownerId());
+        return r.files || [];
+      }
       const job = randId();
       await window.CloudApi.dispatch('list', job);
       await window.CloudApi.waitJob(job);
@@ -129,6 +147,18 @@
       const cur = await api.list().catch(() => []);
       if (cur.some((f) => f.fp === fp)) throw new Error('存储里已经有完全一样的内容了');
 
+      if (viaWorker()) {
+        await window.CloudWorker.put(window.CloudId.ownerId(), id, {
+          name: await window.CloudCrypto.encryptText(nm, P.pass),
+          size: file.size,
+          km: window.CloudId.isAnon() ? 'anon' : (P.kid ? 'simple' : 'pro'),
+          kid: P.kid,
+          fp: fp
+        }, sealed);
+        emit();
+        return id;
+      }
+
       const job = randId();
       const b64 = await window.CloudApi.blobToB64(sealed);
       await window.CloudApi.write(window.CloudCfg.inbox + '/' + job + '.bin', b64, '暂存 ' + job);
@@ -151,6 +181,10 @@
     /* 下载：返回明文 Blob */
     download: async function (id) {
       if (!await ensure()) throw new Error(P.reason);
+      if (viaWorker()) {
+        return window.CloudCrypto.decryptBuffer(
+          await window.CloudWorker.get(window.CloudId.ownerId(), id), P.pass);
+      }
       const job = randId();
       await window.CloudApi.dispatch('get', job, { id });
       const r = await window.CloudApi.waitJob(job, null, 15 * 60 * 1000);
@@ -172,6 +206,11 @@
     /* 删除：没有回收站 */
     remove: async function (id) {
       if (!await ensure()) throw new Error(P.reason);
+      if (viaWorker()) {
+        await window.CloudWorker.del(window.CloudId.ownerId(), id);
+        emit();
+        return true;
+      }
       const job = randId();
       await window.CloudApi.dispatch('del', job, { id });
       await window.CloudApi.waitJob(job);
