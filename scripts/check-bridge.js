@@ -65,5 +65,13 @@ if (process.argv.includes('--self-test')) {
   process.exit(1);
 }
 
+// 大小上限：调用方（Code）应该在加密前就知道，而不是白加密一遍
+const src2=fs.readFileSync(path.join(ROOT,'js/pageapi.js'),'utf8');
+ok('upload 在加密前就拦住超 2GB 的文件', /file\.size > 2 \* 1024 \* 1024 \* 1024/.test(src2));
+const app2=fs.readFileSync(path.join(ROOT,'js/app.js'),'utf8');
+ok('两条上传通道都跳过超限文件',
+   (app2.match(/f\.size > MAX_FILE/g)||[]).length >= 2);
+ok('选完文件就显示总大小和超限提示', /共 ' \+ fs\.length/.test(app2));
+
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
