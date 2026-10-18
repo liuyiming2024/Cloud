@@ -14,9 +14,9 @@
     }
   ],
   "pageApi": [
-    "Cloud.api.ready()            本页是否已可用（有令牌且口令已就位）",
+    "Cloud.api.ready()            本页是否已可用（后端已接、钥匙就位）",
     "Cloud.api.reason()           不可用时返回原因，可用时返回 null",
-    "Cloud.api.init()             重新准备口令（换了账号或令牌之后调一次）",
+    "Cloud.api.init()             重新准备口令（换了账号之后调一次）",
     "Cloud.api.list()             取存储目录，返回文件条目数组",
     "Cloud.api.upload(file,name)  上传 File/Blob，返回文件 id（name 可选，Blob 没名字时要给）",
     "Cloud.api.download(id)       下载，返回明文 Blob",
