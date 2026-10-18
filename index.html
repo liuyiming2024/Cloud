@@ -32,22 +32,20 @@
     <div class="acct">
       <div class="who">
         <div class="nick" id="whoNick">未登录</div>
-        <div class="src" id="whoSrc">在 Chat 或 Code 登录后回到本页，会自动认出你</div>
+        <div class="src" id="whoSrc">登录后回来就认得你</div>
       </div>
       <button id="recheck">重新识别</button>
       <button id="toLogin">去登录</button>
       <button id="logout" style="display:none">退出</button>
     </div>
     <div id="needLogin" class="warn danger" style="display:none">
-      <b>你正在匿名使用，传上去的东西站长能打开。</b>
-      匿名模式只有一把固定口令，它写在这个公开仓库的代码里 —— 站长能解，
-      任何翻到那份代码的人同样能解。这是设计如此：匿名上传的本意就是"交给站长"。
-      <br><b>要保密，就去登录</b>（和 Chat、Code 是同一套账号），登录后口令由你的账号派生，谁都算不出来。
-      <br>另外：匿名身份只存在这台浏览器里。清了浏览器数据、换台设备，你传的文件就再也找不回来了。
+      <b>没登录，站长能看到你传的东西。</b>
+      <br>想保密就<b>登录</b>一下。
+      <br>没登录时文件只认这台浏览器 —— 清了缓存、换台电脑，就找不回来了。
     </div>
 
     <div style="margin-top:14px">
-      <label>口令模式</label>
+      <label>钥匙怎么来</label>
       <div class="seg" id="modeSeg">
         <button data-mode="simple" class="on">简单模式</button>
         <button data-mode="pro">专业模式</button>
@@ -57,63 +55,60 @@
 
     <!-- 简单模式：口令由账号算出 -->
     <div id="simpleBox" style="margin-top:14px">
-      <label>当前口令编号</label>
       <div class="acct">
-        <div class="who"><span class="kid" id="kidText">（未生成）</span></div>
-        <button id="refreshKey">刷新口令</button>
+        <div class="who"><span class="kid" id="kidText">（准备中）</span></div>
+        <button id="refreshKey">换一把钥匙</button>
       </div>
       <div class="warn">
-        <b>你的口令不会和别人重复。</b>万一撞了会自动换一个，你不用管。
+        <b>你的钥匙不会和别人重复。</b>万一撞了会自动换一把，你不用管。
       </div>
       <div class="warn danger">
-        <b>别乱点「刷新口令」。</b>
-        点了之后老文件还能打开，但如果你<b>清了浏览器数据</b>，或者<b>换电脑又登不上账号</b>，
-        老文件就彻底打不开了。只有怀疑口令泄露时才点。
+        <b>别乱点「换一把钥匙」。</b>
+        点了之后老文件还能打开，但如果你<b>清了缓存</b>或<b>换电脑又登不上账号</b>，就彻底打不开了。
+        只有怀疑钥匙泄露时才点。
       </div>
     </div>
 
     <!-- 专业模式：口令自己定 -->
     <div id="proBox" style="margin-top:14px; display:none">
-      <label for="pass">加密口令</label>
-      <input id="pass" type="password" placeholder="你自己定，谁都算不出来" autocomplete="new-password">
+      <label for="pass">钥匙</label>
+      <input id="pass" type="password" placeholder="你自己定，谁都猜不到" autocomplete="new-password">
       <div class="warn danger">
-        <b>口令忘了就完了。</b>没有找回，没有客服，文件永久打不开。
+        <b>钥匙忘了就完了。</b>没有找回，没有客服，文件永久打不开。
       </div>
       <div style="margin-top:12px">
-        <label>专业档附加</label>
-        <label class="cb"><input type="checkbox" id="optZip" checked> 压缩后加密</label>
-        <label class="cb"><input type="checkbox" id="optVol"> 分卷（每卷 8MB，坏了只补那一卷）</label>
-        <label class="cb"><input type="checkbox" id="optVerify"> 传完自动校验一遍</label>
+        <label>额外选项</label>
+        <label class="cb"><input type="checkbox" id="optZip" checked> 压小一点再存</label>
+        <label class="cb"><input type="checkbox" id="optVol"> 切成小块存（每块 8MB）</label>
+        <label class="cb"><input type="checkbox" id="optVerify"> 存完检查一下有没有坏</label>
         <div class="hint">
-          分卷会让上传轮数变多，小文件勾它只会更慢。丢任何一卷，整份文件都解不开 ——
-          它换来的是"单卷失败只需重传那一卷"，不是"丢几卷还能救回来"。
+          切成小块后，某一块没传好可以只补那一块。但少任何一块，整个文件都打不开。
+          小文件不用勾，勾了反而慢。
         </div>
       </div>
 
       <div style="margin-top:12px" class="row2">
-        <button id="btnManifest">导出校验清单</button>
-        <button id="btnVerify">校验全部</button>
-        <button id="btnExport">批量导出（ZIP）</button>
+        <button id="btnManifest">导出清单</button>
+        <button id="btnVerify">检查全部</button>
+        <button id="btnExport">打包下载</button>
       </div>
-      <div class="hint">批量导出会逐个解密再打包，文件多的时候要等一会儿。</div>
+      <div class="hint">打包下载会一个个解开再打包，文件多的时候要等一会儿。</div>
 
       <div class="warn">
-        <b>专业档会先压缩再加密。</b>
-        文本、代码、日志能压掉大半；照片、视频本来就压过了，压了也不会变小 ——
-        遇到这种会自动存原样，不会为了"看着专业"把文件撑大。
-        压缩方式写在密文里，下载时自动还原，不用你记。
+        <b>会先压小再锁。</b>
+        文档、表格能压掉大半；照片、视频本来就压过了，压了也不会变小 ——
+        遇到这种就原样存，不会白费功夫。下载时自动还原，不用你记。
       </div>
     </div>
 
     <div style="margin-top:14px" id="tokenBox">
-      <label for="token">访问令牌（GitHub Personal Access Token）</label>
+      <label for="token">通行证</label>
       <div class="row2">
         <div><input id="token" type="password" placeholder="github_pat_..." autocomplete="off"></div>
         <button id="saveToken">存到本机</button>
       </div>
       <div class="hint">
-        只存在这台浏览器的 localStorage 里。它只需要能写这个公开仓库、能触发一次工作流；
-        真正能读写私有存储库的高权限令牌在仓库的 Actions Secrets 里，这个页面拿不到。
+        只存在这台浏览器里，别人拿不到。
       </div>
     </div>
   </div>
@@ -123,7 +118,7 @@
     <input id="pick" type="file" multiple>
     <div id="picked" style="margin-top:6px"><span class="dim">还没选文件</span></div>
     <div style="margin-top:10px">
-      <button id="upload" class="primary">加密并存储</button>
+      <button id="upload" class="primary">上传</button>
     </div>
   </div>
 
@@ -136,13 +131,13 @@
   </div>
 
   <div class="panel">
-    <label>过程</label>
+    <label>进度</label>
     <div id="log"></div>
     <details>
-      <summary>文件存在哪？慢不慢？</summary>
-      <p>文件先在这台电脑上锁好，再搬到一个不公开的仓库里存着。搬的过程不需要你管。</p>
-      <p>锁文件的钥匙只有你有（登录后），我们看不到，也存不下。</p>
-      <p><strong>慢</strong>：上传下载都要等一会儿，通常几十秒。单文件最大 2GB。</p>
+      <summary>文件存哪？慢不慢？</summary>
+      <p>文件先在这台电脑上锁好，再搬到存东西的地方。搬的过程不用你管。</p>
+      <p>钥匙只有你有（登录后）。我们看不到，也没存。</p>
+      <p><strong>慢</strong>：上传下载都要等一会儿，通常几十秒。单个文件最大 2GB。</p>
     </details>
   </div>
 
