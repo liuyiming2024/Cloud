@@ -263,13 +263,9 @@
     // 否则 SiteIdentity 还没到，account() 读不到人，会误判成"未登录"。
     window.CloudAuth.load().then(detectAccount);
 
+    // 页面上不再有通行证输入框：配好后端之后就不需要它了。
+    // 这里只读历史遗留值，保证之前存过的会话还能用。
     state.token = localStorage.getItem(window.CloudCfg.tokenKey) || '';
-    $('#token').value = state.token;
-    $('#saveToken').addEventListener('click', () => {
-      window.CloudApi.setToken($('#token').value);
-      state.token = window.CloudApi.token();
-      log(state.token ? '通行证已存到这台电脑' : '已清空通行证', 'ok');
-    });
 
     initTheme();
     initMode();
