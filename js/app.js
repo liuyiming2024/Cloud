@@ -344,7 +344,7 @@
     const vs = volSize();
     const vols = vs > 0 ? window.CloudPro.split(sealed, vs) : [sealed];
     const vid = vols.length > 1 ? id : '';
-    if (vols.length > 1) log('  分成 ' + vols.length + ' 卷');
+    if (vols.length > 1) log('  切成 ' + vols.length + ' 小块');
 
     let last = null;
     for (let vi = 0; vi < vols.length; vi++) {
@@ -394,7 +394,7 @@
     const volN = (rec && rec.volN) || 1;
     if (volN > 1) {
       // 分卷：按序把所有卷拉回来拼成一整份密文
-      log('  分卷文件，取 ' + volN + ' 卷…');
+      log('  分块文件，取 ' + volN + ' 块…');
       const parts = [];
       for (let i = 0; i < volN; i++) {
         const vid = (rec.vid || rec.id.replace(/#\d+$/, '')) + '#' + i;
@@ -498,11 +498,27 @@
   }
 
   /* ---------- 上传 ---------- */
+  const MAX_FILE = 2 * 1024 * 1024 * 1024;   // 单文件 2GB
+
+  /* 选完就把话说清楚：多大、超不超限。
+   * 别等传了半天才失败 —— 大文件传到一半才报错最浪费时间。 */
   function renderPicked() {
     const fs = Array.from($('#pick').files || []);
-    $('#picked').innerHTML = fs.length
-      ? fs.map((f) => '<span class="chip">' + esc(f.name) + ' · ' + fmt(f.size) + '</span>').join('')
-      : '<span class="dim">还没选文件</span>';
+    const box = $('#picked');
+    if (!fs.length) { box.innerHTML = '<span class="dim">还没选文件</span>'; return; }
+
+    const total = fs.reduce((a, f) => a + f.size, 0);
+    const over = fs.filter((f) => f.size > MAX_FILE);
+    let html = fs.map((f) => {
+      const bad = f.size > MAX_FILE ? ' style="color:var(--danger)"' : '';
+      return '<span class="chip"' + bad + '>' + esc(f.name) + ' · ' + fmt(f.size) + '</span>';
+    }).join('');
+    html += '<div class="dim" style="margin-top:6px">共 ' + fs.length + ' 个，' + fmt(total) + '</div>';
+    if (over.length) {
+      html += '<div class="dim" style="color:var(--danger);margin-top:4px">' +
+        over.length + ' 个超过 2GB，传不上去</div>';
+    }
+    box.innerHTML = html;
   }
 
   async function doUpload() {
@@ -527,6 +543,10 @@
 
     for (const f of fs) {
       const id = randId();
+      if (f.size > MAX_FILE) {
+        log('跳过：' + f.name + '（超过 2GB，传不上去）', 'err');
+        continue;
+      }
       try {
         log('加密中：' + f.name);
         const enc = await window.CloudCrypto.encryptBlob(f, state.pass, procMode());
@@ -549,12 +569,12 @@
           fp: fp,
           proc: enc.proc,
           oid: window.CloudId.ownerId()
-        }, (i, n) => { if (n > 1) log('  第 ' + i + '/' + n + ' 卷已存入'); });
+        }, (i, n) => { if (n > 1) log('  第 ' + i + '/' + n + ' 块已存入'); });
 
         if (out.r && out.r.dup) {
           log('跳过：' + f.name + '（存储里已经有完全一样的内容，服务端拦下了）', 'err');
         } else {
-          log('已存入：' + f.name + (out.vols > 1 ? '（' + out.vols + ' 卷）' : ''), 'ok');
+          log('已存入：' + f.name + (out.vols > 1 ? '（' + out.vols + ' 小块）' : ''), 'ok');
         }
         if (verifyOn()) await verifyOne(id, f.name, fp, state.pass);
       } catch (e) {
@@ -619,6 +639,7 @@
     try { await loadListW(true); known = state.files.map((f) => f.fp || ''); } catch (e) {}
 
     for (const f of fs) {
+      if (f.size > MAX_FILE) { log('跳过：' + f.name + '（超过 2GB，传不上去）', 'err'); continue; }
       try {
         const id = randId();
         log('加密中：' + f.name);
@@ -636,9 +657,9 @@
           fp: fp,
           proc: enc.proc,
           oid: window.CloudId.ownerId()
-        }, (i, n) => { if (n > 1) log('  第 ' + i + '/' + n + ' 卷已存入'); });
+        }, (i, n) => { if (n > 1) log('  第 ' + i + '/' + n + ' 块已存入'); });
 
-        log('已存入：' + f.name + (out.vols > 1 ? '（' + out.vols + ' 卷）' : '') +
+        log('已存入：' + f.name + (out.vols > 1 ? '（' + out.vols + ' 小块）' : '') +
             '（密文 ' + fmt(sealed.size) + '）', 'ok');
         if (verifyOn()) await verifyOne(id, f.name, fp, state.pass);
       } catch (e) {
@@ -687,22 +708,23 @@
   function renderList() {
     const box = $('#list');
     if (!state.files.length) {
-      box.innerHTML = '<div class="dim">还没有文件</div>';
+      box.innerHTML = '<div class="dim">这里还空着。上面选个文件传上来，再点「刷新」看看。</div>';
       return;
     }
     // 分卷文件只显示代表那一条（第 0 卷），否则一个文件会占好几行
-    const shown = state.files.filter((f) => !(f.volN > 1 && f.vol !== 0));
-    box.innerHTML = shown.map((f) => {
-      let shown = '（口令不对或已损坏）';
-      try { shown = state.pass ? window.CloudCrypto.decryptText(f.name, state.pass) : '🔒 加密文件名'; } catch (e) {}
-      const tag = f.km === 'pro' ? '<span class="kid">专业</span>' : '';
-      const vol = f.volN > 1 ? '<span class="kid">' + f.volN + ' 卷</span>' : '';
+    const rows = state.files.filter((f) => !(f.volN > 1 && f.vol !== 0));
+    // 分卷只显示代表那一条（第 0 卷），否则一个文件会占好几行
+    box.innerHTML = rows.map((f) => {
+      let nm = '（钥匙不对或已损坏）';
+      try { nm = state.pass ? window.CloudCrypto.decryptText(f.name, state.pass) : '🔒 加密文件名'; } catch (e) {}
+      const tag = f.km === 'pro' ? '<span class="kid">专业档</span>' : '';
+      const vol = f.volN > 1 ? '<span class="kid">' + f.volN + ' 小块</span>' : '';
       const key = f.vid || f.id;
       const chk = state.mode === 'pro'
         ? '<input type="checkbox" class="pk"' + (state.picked.has(key) ? ' checked' : '') + '>'
         : '';
       return '<div class="row" data-id="' + esc(f.id) + '" data-key="' + esc(key) + '">' +
-        '<span class="nm">' + chk + ' ' + esc(shown) + ' ' + tag + ' ' + vol + '</span>' +
+        '<span class="nm">' + chk + ' ' + esc(nm) + ' ' + tag + ' ' + vol + '</span>' +
         '<span class="sz">' + fmt(f.size || 0) + '</span>' +
         '<span class="at">' + esc((f.at || '').slice(0, 10)) + '</span>' +
         '<button class="dl">下载</button>' +
