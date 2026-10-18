@@ -173,10 +173,24 @@
     return j;
   }
 
+  /* 带身份去后端。
+   *
+   * 后端按身份决定配额（站长不限、访客有限）。
+   * 不带的话一律按访客算 —— 也就是站长自己不带也会被限，
+   * 所以只要本地有会话就带上。 */
+  function hdr(extra) {
+    const h = { 'Content-Type': 'application/octet-stream' };
+    try {
+      const t = window.CloudAuth && window.CloudAuth.token && window.CloudAuth.token();
+      if (t) h['X-Access-Token'] = t;
+    } catch (e) {}
+    return Object.assign(h, extra || {});
+  }
+
   window.CloudWorker = {
     on: () => !!W(),
 
-    list: (oid) => wjson(W() + '/api/list?oid=' + encodeURIComponent(oid)),
+    list: (oid) => wjson(W() + '/api/list?oid=' + encodeURIComponent(oid), { headers: hdr() }),
 
     put: async (oid, id, meta, blob) => {
       const m = btoa(unescape(encodeURIComponent(JSON.stringify(meta))));
@@ -184,19 +198,20 @@
                    '&id=' + encodeURIComponent(id) +
                    '&meta=' + encodeURIComponent(m), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
+        headers: hdr(),
         body: blob
       });
     },
 
     get: async (oid, id) => {
       const r = await fetch(W() + '/api/get?oid=' + encodeURIComponent(oid) +
-                            '&id=' + encodeURIComponent(id));
+                            '&id=' + encodeURIComponent(id), { headers: hdr() });
       if (!r.ok) throw new Error('取不到文件');
       return r.arrayBuffer();
     },
 
     del: (oid, id) => wjson(W() + '/api/del?oid=' + encodeURIComponent(oid) +
-                            '&id=' + encodeURIComponent(id), { method: 'DELETE' })
+                            '&id=' + encodeURIComponent(id),
+                            { method: 'DELETE', headers: hdr() })
   };
 })();
