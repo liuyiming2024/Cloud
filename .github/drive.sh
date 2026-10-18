@@ -115,6 +115,15 @@ fi
 # 这是**不可伪造**的 —— 想让 actor 等于站长，就得有站长本人的 token，
 # 而那东西只在站长自己手里。相比之下，让页面传"我是站长"这种标记毫无意义：
 # 任何人都能传。所以这里只认 actor，不认页面说了什么。
+# 访客配额。站长不限。
+#
+# 为什么这里也要限：配额不能只做在 Worker 里。
+# 两条通道通向同一个仓库，只限一条等于没限 ——
+# 绕过 Worker 直接走 Actions，配额就形同虚设。
+# 数字必须和 worker/drive.js 里的一致。
+GUEST_FILE_MAX=$((100 * 1024 * 1024))
+GUEST_TOTAL_MAX=$((1024 * 1024 * 1024))
+
 OWNER_LOGIN="${DRIVE_OWNER_LOGIN:-liuyiming2024}"
 IS_OWNER="false"
 [ "${ACTOR:-}" = "${OWNER_LOGIN}" ] && IS_OWNER="true"
@@ -195,6 +204,18 @@ case "$OP" in
       || fail "读不到暂存文件 inbox/${JOB}.bin"
     CSIZE=$(stat -c%s "$SRC")
     [ "$CSIZE" -lt 32 ] && fail "暂存文件是空的或过小（${CSIZE} 字节），上传可能被中断"
+
+    # 配额。站长（actor 校验过，伪造不了）不限，其余按 oid 累计。
+    # 放在写存储之前 —— 都传完了才说超了，白占一次 Actions 额度。
+    if [ "$IS_OWNER" != "true" ]; then
+      if [ "$CSIZE" -gt "$GUEST_FILE_MAX" ]; then
+        fail "单个文件最大 $((GUEST_FILE_MAX / 1024 / 1024))MB，这个有 $((CSIZE / 1024 / 1024))MB"
+      fi
+      USED=$(read_index | jq -r --arg o "$OID" '[.files[]?|select(.oid==$o)|.cipher//0]|add//0')
+      if [ $((USED + CSIZE)) -gt "$GUEST_TOTAL_MAX" ]; then
+        fail "空间不够：已用 $((USED / 1024 / 1024))MB，上限 $((GUEST_TOTAL_MAX / 1024 / 1024))MB，还差 $(((USED + CSIZE - GUEST_TOTAL_MAX) / 1024 / 1024))MB。先删掉一些。"
+      fi
+    fi
 
     STORE="git"
     if [ "$CSIZE" -gt "${BIG}" ]; then
