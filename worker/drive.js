@@ -16,6 +16,20 @@
 
 const MAX_DIRECT = 20 * 1024 * 1024; // 20MB 以内走 Contents API。
                                      // 再大就在 Worker 里 base64 会吃满内存，改走 Release。
+
+/* 访客配额。站长不限 —— 那是他自己的仓库。
+ *
+ * 为什么必须限：仓库是公摊的，不限的话一个人就能把它撑到没法维护
+ * （git 历史只增不减，仓库一旦大了，clone 和 Actions 都会变慢）。
+ *
+ * 配额按"人"算，不按全站算：
+ *   按全站算会出现"来得早的能用、来得晚的用不了"，而且先到的人占满之后，
+ *   后来者连一个小文件都传不了。
+ *
+ * 这些值在 Worker 里改，前端那份只用于提前提示。 */
+const GUEST_FILE_MAX = 100 * 1024 * 1024;      // 单文件 100MB
+const GUEST_TOTAL_MAX = 1024 * 1024 * 1024;    // 总共 1GB
+
 const OID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export default {
@@ -27,7 +41,7 @@ export default {
     const cors = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
+      'Access-Control-Allow-Headers': 'Content-Type, X-Access-Token'
     };
     const json = (obj, code = 200) =>
       new Response(JSON.stringify(obj), { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -35,11 +49,22 @@ export default {
 
     try {
       if (!env.DRIVE_PAT) return err('Worker 未配置 DRIVE_PAT', 500);
+
+      /* 站长判定必须在后端做。
+       *
+       * 不能看请求里传的 oid —— 那东西谁都能改（就在浏览器 localStorage 里）。
+       * 让人自己说"我是站长"然后据此放行，等于没设限。
+       *
+       * 所以：拿请求头里的 access_token 去 Supabase 验一次，
+       * 验出来是谁就是谁，这个 uid 伪造不了。
+       * 验不出身份的一律按访客处理，配额从紧。 */
+      const who = await resolveIdentity(req, env);
       const repo = env.DRIVE_REPO || 'liuyiming2024/Cloud_file';
       const gh = new GitHub(env.DRIVE_PAT, repo);
 
       const oid = url.searchParams.get('oid') || '';
       if (!OID_RE.test(oid)) return err('缺少或不合法的归属标识');
+
 
       // 列表
       if (url.pathname === '/api/list' && req.method === 'GET') {
@@ -57,6 +82,21 @@ export default {
         if (body.byteLength > 2 * 1024 * 1024 * 1024) return err('文件超过 2GB');
 
         const idx = await gh.readIndex();
+
+        // 配额：站长不限，其余按人来算
+        if (!who.isOwner) {
+          if (body.byteLength > GUEST_FILE_MAX) {
+            return err('单个文件最大 ' + mb(GUEST_FILE_MAX) + '，这个有 ' + mb(body.byteLength), 413);
+          }
+          const used = idx.files.filter((f) => f.oid === oid)
+                                .reduce((a, f) => a + (f.cipher || 0), 0);
+          if (used + body.byteLength > GUEST_TOTAL_MAX) {
+            return err('空间不够了：已用 ' + mb(used) + '，上限 ' + mb(GUEST_TOTAL_MAX) +
+                       '，这个文件还差 ' + mb(used + body.byteLength - GUEST_TOTAL_MAX) +
+                       '。删掉一些再传。', 413);
+          }
+        }
+
         if (meta.fp && idx.files.some((f) => f.fp === meta.fp)) {
           return err('已经有完全一样的内容了', 409);
         }
@@ -114,12 +154,47 @@ export default {
   }
 };
 
+/* 字节数 → 人能读的大小 */
+function mb(n) {
+  if (n >= 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(1) + 'GB';
+  if (n >= 1024 * 1024) return Math.round(n / 1024 / 1024) + 'MB';
+  return Math.round(n / 1024) + 'KB';
+}
+
+/* 这个人是谁？
+ *
+ * 拿请求头里的 access_token 去 Supabase 验一次，验出 uid 就拿到了
+ * **不可伪造**的身份 —— 伪造得有真令牌才行。
+ *
+ * 验不到（没带、过期、服务异常）就当访客，配额从紧。
+ * 注意"服务异常"也按访客处理：宁可让站长临时受限，也不能在
+ * 验证失败时放行 —— 那是把门开在失败分支上。 */
+async function resolveIdentity(req, env) {
+  const tok = req.headers.get('X-Access-Token') || '';
+  const out = { isOwner: false, uid: null };
+  if (!tok || !env.SB_URL || !env.SB_KEY) return out;
+  try {
+    const r = await fetch(env.SB_URL + '/auth/v1/user', {
+      headers: { Authorization: 'Bearer ' + tok, apikey: env.SB_KEY }
+    });
+    if (!r.ok) return out;
+    const u = await r.json();
+    out.uid = u.id || null;
+    // 站长 uid 存在 Secret 里，不写死在代码里 ——
+    // 写死等于把"谁是站长"这个判断依据公开了。
+    out.isOwner = !!(out.uid && env.OWNER_UID && out.uid === env.OWNER_UID);
+  } catch (e) {
+    // 验证出错 = 验不到身份，按访客算
+  }
+  return out;
+}
+
 function preflight() {
   return new Response(null, {
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Access-Token',
       'Access-Control-Max-Age': '86400'
     }
   });
