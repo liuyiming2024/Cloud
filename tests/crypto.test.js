@@ -88,6 +88,21 @@ try {
 } catch (e) { badProc = /预处理/.test(e.message); }
 ok('未知预处理方式被识别并报错', badProc);
 
+// ---- 进度回调（大文件要让人知道在动）----
+const bigB=new Blob([new Uint8Array(9*1024*1024)]);   // 9MB = 3 块
+const ticks=[];
+await C.encryptBlob(bigB,'p1','none',(d,t)=>ticks.push([d,t]));
+ok('加密时回调了进度', ticks.length>0, '得到 '+ticks.length+' 次');
+ok('最后一次是满进度', ticks.length>0 && ticks[ticks.length-1][0]===ticks[ticks.length-1][1]);
+const encB=await C.encryptBlob(bigB,'p1','none');
+const dticks=[];
+await C.decryptBuffer(await encB.blob.arrayBuffer(),'p1',(d,t)=>dticks.push([d,t]));
+ok('解密时也回调进度', dticks.length>0);
+ok('小文件不刷屏（只有 1 块时不回调）', (await (async()=>{
+  const n=[]; await C.encryptBlob(new Blob([new Uint8Array(100)]),'p','none',(d,t)=>n.push(1));
+  return n.length;
+})())<=1);
+
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
 })().catch(e=>{console.error('崩了',e);process.exit(1)});
