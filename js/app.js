@@ -101,6 +101,9 @@
       b.addEventListener('click', () => {
         if (window.CloudId.isAnon()) return;
         if (state.mode === b.dataset.mode) return;
+        if (b.dataset.mode === 'pro' && !state.proPass) {
+          if (!confirm('换成专业档？\n\n钥匙由你自己定并自己记住。忘了就永远打不开，没有找回。')) return;
+        }
         state.mode = b.dataset.mode;
         window.CloudId.setMode(state.mode);
         paint();
@@ -117,7 +120,6 @@
   async function detectAccount() {
     const a = window.CloudId.account();
     state.account = a;
-    const need = $('#needLogin');
     if (!a) {
       // 未登录也能用：归到本机的匿名 id 下，照样能传能取
       $('#whoNick').textContent = '未登录 · 匿名使用';
@@ -125,7 +127,6 @@
       $('#logout').style.display = 'none';
       $('#toLogin').style.display = '';
       // 匿名不是"功能缺失"，是"另一种约定"——必须把代价摆在眼前
-      need.style.display = '';
       return false;
     }
     $('#whoNick').textContent = '已识别 · ' + a.short + '…';
@@ -296,13 +297,20 @@
     });
 
     $('#refreshKey').addEventListener('click', () => {
-      if (!confirm('刷新口令？\n\n你会得到一把全新的口令。老文件仍能打开（旧口令会保留），\n但如果你清了浏览器数据、或换设备登不上原账号，老文件就报废了。\n\n只在怀疑泄露时刷新。')) return;
+      if (!confirm('换一把新钥匙？\n\n老文件还能打开，但如果之后清了缓存、或换电脑又登不上账号，老文件就打不开了。\n\n只在怀疑钥匙泄露时才换。')) return;
       ensureKey(true);
     });
 
     $('#pass').addEventListener('input', () => {
       state.proPass = $('#pass').value;
       if (state.mode === 'pro') state.pass = state.proPass;
+    });
+
+    const optVol = $('#optVol');
+    if (optVol) optVol.addEventListener('change', () => {
+      if (optVol.checked && !confirm('切成小块存？\n\n好处是某一块没传好可以只补那一块。\n但少任何一块，整个文件都打不开。\n\n小文件不建议勾，会变慢。')) {
+        optVol.checked = false;
+      }
     });
 
     $('#btnManifest').addEventListener('click', exportManifest);
@@ -504,6 +512,11 @@
     }
     const fs = Array.from($('#pick').files || []);
     if (!fs.length) { log('先选文件', 'err'); return; }
+    // 只提示一次。每次上传都拦一下太烦，而风险已经说过了。
+    if (window.CloudId.isAnon() && !state.anonWarned) {
+      if (!confirm('没登录，站长能看到你传的东西。\n\n要保密就先登录。继续吗？')) return;
+      state.anonWarned = true;
+    }
     $('#upload').disabled = true;
 
     // 先取一次目录，拿已有指纹做防重
@@ -592,6 +605,11 @@
     if (!state.pass) { if (!await ensureKey()) return; }
     const fs = Array.from($('#pick').files || []);
     if (!fs.length) { log('先选文件', 'err'); return; }
+    // 只提示一次。每次上传都拦一下太烦，而风险已经说过了。
+    if (window.CloudId.isAnon() && !state.anonWarned) {
+      if (!confirm('没登录，站长能看到你传的东西。\n\n要保密就先登录。继续吗？')) return;
+      state.anonWarned = true;
+    }
     $('#upload').disabled = true;
     const oid = window.CloudId.ownerId();
 
