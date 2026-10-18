@@ -38,11 +38,6 @@
       <button id="toLogin">去登录</button>
       <button id="logout" style="display:none">退出</button>
     </div>
-    <div id="needLogin" class="warn danger" style="display:none">
-      <b>没登录，站长能看到你传的东西。</b>
-      <br>想保密就<b>登录</b>一下。
-      <br>没登录时文件只认这台浏览器 —— 清了缓存、换台电脑，就找不回来了。
-    </div>
 
     <div style="margin-top:14px">
       <label>钥匙怎么来</label>
@@ -59,45 +54,23 @@
         <div class="who"><span class="kid" id="kidText">（准备中）</span></div>
         <button id="refreshKey">换一把钥匙</button>
       </div>
-      <div class="warn">
-        <b>你的钥匙不会和别人重复。</b>万一撞了会自动换一把，你不用管。
-      </div>
-      <div class="warn danger">
-        <b>别乱点「换一把钥匙」。</b>
-        点了之后老文件还能打开，但如果你<b>清了缓存</b>或<b>换电脑又登不上账号</b>，就彻底打不开了。
-        只有怀疑钥匙泄露时才点。
-      </div>
     </div>
 
     <!-- 专业模式：口令自己定 -->
     <div id="proBox" style="margin-top:14px; display:none">
       <label for="pass">钥匙</label>
       <input id="pass" type="password" placeholder="你自己定，谁都猜不到" autocomplete="new-password">
-      <div class="warn danger">
-        <b>钥匙忘了就完了。</b>没有找回，没有客服，文件永久打不开。
-      </div>
       <div style="margin-top:12px">
         <label>额外选项</label>
         <label class="cb"><input type="checkbox" id="optZip" checked> 压小一点再存</label>
         <label class="cb"><input type="checkbox" id="optVol"> 切成小块存（每块 8MB）</label>
         <label class="cb"><input type="checkbox" id="optVerify"> 存完检查一下有没有坏</label>
-        <div class="hint">
-          切成小块后，某一块没传好可以只补那一块。但少任何一块，整个文件都打不开。
-          小文件不用勾，勾了反而慢。
-        </div>
       </div>
 
       <div style="margin-top:12px" class="row2">
         <button id="btnManifest">导出清单</button>
         <button id="btnVerify">检查全部</button>
         <button id="btnExport">打包下载</button>
-      </div>
-      <div class="hint">打包下载会一个个解开再打包，文件多的时候要等一会儿。</div>
-
-      <div class="warn">
-        <b>会先压小再锁。</b>
-        文档、表格能压掉大半；照片、视频本来就压过了，压了也不会变小 ——
-        遇到这种就原样存，不会白费功夫。下载时自动还原，不用你记。
       </div>
     </div>
 
@@ -106,9 +79,6 @@
       <div class="row2">
         <div><input id="token" type="password" placeholder="github_pat_..." autocomplete="off"></div>
         <button id="saveToken">存到本机</button>
-      </div>
-      <div class="hint">
-        只存在这台浏览器里，别人拿不到。
       </div>
     </div>
   </div>
