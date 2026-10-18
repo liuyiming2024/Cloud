@@ -59,12 +59,24 @@ export default {
        * 验出来是谁就是谁，这个 uid 伪造不了。
        * 验不出身份的一律按访客处理，配额从紧。 */
       const who = await resolveIdentity(req, env);
+      const ip = req.headers.get('CF-Connecting-IP') || '';
+
+      // 信号一：带了令牌，但是假的 —— 这是在试探身份
+      if (who.configured && who.badToken) {
+        return deny(ip, '没有权限');
+      }
       const repo = env.DRIVE_REPO || 'liuyiming2024/Cloud_file';
       const gh = new GitHub(env.DRIVE_PAT, repo);
 
       const oid = url.searchParams.get('oid') || '';
-      if (!OID_RE.test(oid)) return err('缺少或不合法的归属标识');
+      if (!OID_RE.test(oid)) return deny(ip, '没有权限');
 
+
+      // 信号二：验出真实身份，却去访问别人的 uid。
+      // 站长除外 —— 他本来就该能看所有人的。
+      if (who.uid && !who.isOwner && !oid.startsWith('anon-') && oid !== who.uid) {
+        return deny(ip, '没有权限');
+      }
 
       // 列表
       if (url.pathname === '/api/list' && req.method === 'GET') {
@@ -86,7 +98,10 @@ export default {
         // 配额：站长不限，其余按人来算
         if (!who.isOwner) {
           if (body.byteLength > GUEST_FILE_MAX) {
-            return err('单个文件最大 ' + mb(GUEST_FILE_MAX) + '，这个有 ' + mb(body.byteLength), 413);
+            // 超配额是正常使用，不该罚 —— 用户可能真不知道上限在哪。
+            // 但要说清楚差多少，否则他只能瞎猜该删多少。
+            return err('单个文件最大 ' + mb(GUEST_FILE_MAX) + '，这个有 ' +
+                       mb(body.byteLength), 413);
           }
           const used = idx.files.filter((f) => f.oid === oid)
                                 .reduce((a, f) => a + (f.cipher || 0), 0);
@@ -154,6 +169,60 @@ export default {
   }
 };
 
+/* ---------- 惩罚性延迟 ----------
+ *
+ * 为什么不让伪造请求立刻失败：
+ *   立刻拒绝等于白送攻击者一个"对/错"应答器 ——
+ *   他能在几秒内试几千个 uid、几千个伪造令牌，每次几毫秒就有答案。
+ *   让他等一会儿再拒绝，每次尝试就有了成本，扫描效率会掉几个数量级。
+ *
+ * 为什么不是一小时：
+ *   HTTP 请求根本等不了一小时 —— 客户端、浏览器、网关都会先断开，
+ *   而一断，Cloudflare 就把这次调用整个取消：惩罚没落到他头上，
+ *   反倒白占着我们自己的资源。想罚他，就得让他真的等到那个响应。
+ *
+ * 所以做成累进的：第一次几秒，越试越久，封顶 30 秒。
+ * 次数记在 Cache API 里 —— 它不用额外绑定 KV，不增加部署步骤。
+ */
+const TARPIT = {
+  base: 3000,      // 第一次 3 秒
+  max: 30000,      // 最多 30 秒
+  banAfter: 5,     // 再犯直接拒，不再陪他耗（否则反被拖住）
+  ttl: 600         // 10 分钟没再犯就清零
+};
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+async function strikeCount(ip) {
+  const key = 'https://tarpit.invalid/' + (ip || 'unknown');
+  let n = 0;
+  try {
+    const hit = await caches.default.match(key);
+    if (hit) n = parseInt(await hit.text(), 10) || 0;
+  } catch (e) { /* 记不到就当第一次 */ }
+  return { n: n, key: key };
+}
+
+async function bumpStrike(s) {
+  try {
+    await caches.default.put(s.key, new Response(String(s.n + 1), {
+      headers: { 'Cache-Control': 'public, max-age=' + TARPIT.ttl }
+    }));
+  } catch (e) { /* 记不上不影响本次拒绝 */ }
+}
+
+/* 可疑行为：等一会儿再拒。
+   消息刻意含糊 —— 不说明是配额、是身份、还是格式问题，
+   那等于在教他下次怎么改。 */
+async function deny(ip, msg) {
+  const s = await strikeCount(ip);
+  await bumpStrike(s);
+  if (s.n < TARPIT.banAfter) {
+    await sleep(Math.min(TARPIT.base * Math.pow(2, s.n), TARPIT.max));
+  }
+  return err(msg || '没有权限', 403);
+}
+
 /* 字节数 → 人能读的大小 */
 function mb(n) {
   if (n >= 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(1) + 'GB';
@@ -171,13 +240,17 @@ function mb(n) {
  * 验证失败时放行 —— 那是把门开在失败分支上。 */
 async function resolveIdentity(req, env) {
   const tok = req.headers.get('X-Access-Token') || '';
-  const out = { isOwner: false, uid: null };
-  if (!tok || !env.SB_URL || !env.SB_KEY) return out;
+  // configured：有没有配身份服务。没配就无从判断，
+  // 不能把"我认不出你"算成"你在伪造" —— 那会误伤所有访客。
+  const out = { isOwner: false, uid: null, badToken: false, configured: false };
+  if (!env.SB_URL || !env.SB_KEY) return out;
+  out.configured = true;
+  if (!tok) return out;                 // 没带令牌 = 老实匿名，不算伪造
   try {
     const r = await fetch(env.SB_URL + '/auth/v1/user', {
       headers: { Authorization: 'Bearer ' + tok, apikey: env.SB_KEY }
     });
-    if (!r.ok) return out;
+    if (!r.ok) { out.badToken = true; return out; }   // 带了，但是假的
     const u = await r.json();
     out.uid = u.id || null;
     // 站长 uid 存在 Secret 里，不写死在代码里 ——
