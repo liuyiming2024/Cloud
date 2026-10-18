@@ -145,6 +145,8 @@
      *       下载出来还是二进制，而且不报错 —— 文件在，只是打不开，最难查。 */
     upload: async function (file, name, proc) {
       if (!await ensure()) throw new Error(P.reason);
+      // 超了就立刻说，别让调用方白加密一遍大文件 —— 那很耗时
+      if (file.size > 2 * 1024 * 1024 * 1024) throw new Error('文件超过 2GB，传不上去');
       const nm = name || file.name || ('blob-' + randId());
       const id = randId();
 
