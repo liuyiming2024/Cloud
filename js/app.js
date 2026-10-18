@@ -522,6 +522,25 @@
   }
 
   async function doUpload() {
+    // 选完先按配额过一遍。这只是提前提醒 ——
+    // 真正的拦截在后端：前端拦不住人，改个数字就绕过去了。
+    const q = window.CloudCfg.quota;
+    const chosen = Array.from($('#pick').files || []);
+    if (window.CloudId.isAnon()) {
+      const used = state.files.reduce((a, f) => a + (f.cipher || 0), 0);
+      const big = chosen.filter((f) => f.size > q.guestFileMax);
+      if (big.length) {
+        log('有 ' + big.length + ' 个超过 ' + fmt(q.guestFileMax) + '，传不了：' +
+            big.map((f) => f.name).join('、'), 'err');
+        return;
+      }
+      const add = chosen.reduce((a, f) => a + f.size, 0);
+      if (used + add > q.guestTotalMax) {
+        log('空间不够：已用 ' + fmt(used) + '，上限 ' + fmt(q.guestTotalMax) +
+            '，这次要加 ' + fmt(add) + '。先删掉一些。', 'err');
+        return;
+      }
+    }
     if (window.CloudWorker.on()) return doUploadW();
     if (!state.token) { log('还没接上后端，暂时用不了。', 'err'); return; }
     if (!state.pass) {
@@ -705,6 +724,19 @@
     } catch (e) { log('删除失败：' + e.message, 'err'); }
   }
 
+  /* 用了多少、还能用多少。摆在眼前，
+   * 别等传失败才知道超了 —— 大文件传到一半才报错最浪费时间。 */
+  function paintQuota(files) {
+    const box = $('#quota');
+    if (!box) return;
+    const q = window.CloudCfg.quota;
+    const used = files.reduce((a, f) => a + (f.cipher || 0), 0);
+    box.innerHTML = window.CloudId.isAnon()
+      ? '<span class="dim">已用 ' + fmt(used) + ' / ' + fmt(q.guestTotalMax) +
+        '（单文件最大 ' + fmt(q.guestFileMax) + '）</span>'
+      : '<span class="dim">已用 ' + fmt(used) + '</span>';
+  }
+
   function renderList() {
     const box = $('#list');
     if (!state.files.length) {
@@ -713,6 +745,7 @@
     }
     // 分卷文件只显示代表那一条（第 0 卷），否则一个文件会占好几行
     const rows = state.files.filter((f) => !(f.volN > 1 && f.vol !== 0));
+    paintQuota(state.files);
     // 分卷只显示代表那一条（第 0 卷），否则一个文件会占好几行
     box.innerHTML = rows.map((f) => {
       let nm = '（钥匙不对或已损坏）';
