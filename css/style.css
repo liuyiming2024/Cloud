@@ -236,3 +236,12 @@ code {
 /* ---------- 列表多选 ---------- */
 .row.pick { background: var(--panel2); }
 .row input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); }
+
+/* ---------- 顶部导航 ---------- */
+.nav {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px; font-size: 13px;
+}
+.nav a { color: var(--accent); text-decoration: none; }
+.nav a:hover { text-decoration: underline; }
+.nav .sep { color: var(--dim); }
