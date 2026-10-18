@@ -124,7 +124,7 @@
    *
    * proc: 'auto'（默认，压了更小才压）| 'gzip'（一定压）| 'none'（不压）
    * 返回 { blob, proc, saved } —— proc 要存进索引，saved 只是给界面看的。 */
-  async function encryptBlob(blob, passphrase, proc) {
+  async function encryptBlob(blob, passphrase, proc, onProgress) {
     proc = proc || 'auto';
     let body = blob;
     let code = PROC_NONE;
@@ -158,6 +158,9 @@
       );
       parts.push({ iv, len: buf.byteLength, sealed });
       outLen += IV_LEN + 4 + sealed.length;
+      // 大文件加密要跑好几秒，不说点什么的话，用户会以为卡死了然后刷新 ——
+      // 刷新丢的是已经等过的那段时间。
+      if (onProgress && (i % 4 === 0 || i === chunks - 1)) onProgress(i + 1, chunks);
     }
 
     const out = new Uint8Array(outLen);
@@ -183,7 +186,7 @@
    *
    * 按头里的 ver 分支：v1 没有预处理，v2 可能有 gzip。
    * 老文件（v1）照样能开 —— 它们本来就没压过。 */
-  async function decryptBuffer(raw, passphrase) {
+  async function decryptBuffer(raw, passphrase, onProgress) {
     const b = new Uint8Array(raw);
     for (let i = 0; i < 4; i++) {
       if (b[i] !== MAGIC[i]) throw new Error('不是本云盘的密文文件（魔数不对）');
@@ -205,6 +208,17 @@
 
     const key = await deriveKey(passphrase, salt, window.CloudCfg.crypto.iterations);
     const plain = [];
+    // 先算出总块数，否则进度只能给"已处理几块"而给不出分母
+    let nChunks = 0;
+    {
+      let q = p;
+      while (q < b.length) {
+        if (q + IV_LEN + 4 > b.length) break;
+        const len = readU32(b, q + IV_LEN);
+        q += IV_LEN + 4 + len + 16;
+        nChunks++;
+      }
+    }
 
     let i = 0;
     while (p < b.length) {
@@ -217,6 +231,7 @@
         await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: u32(i) }, key, sealed)
       );
       i++;
+      if (onProgress && (i % 4 === 0 || i === nChunks)) onProgress(i, nChunks);
     }
 
     let out = new Blob(plain, { type: 'application/octet-stream' });
