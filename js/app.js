@@ -140,7 +140,7 @@
    * 登录了：口令由账号派生，全局唯一，撞了自动换轮次。
    * 没登录：匿名模式，用 config 里那把写死的固定口令，没得选。 */
   async function ensureKey(forceRefresh) {
-    if (!state.token && !window.CloudWorker.on()) { log('先填访问令牌', 'err'); return false; }
+    if (!state.token && !window.CloudWorker.on()) { log('先填通行证', 'err'); return false; }
     await detectAccount();
 
     // 匿名模式只有一把写死的口令，没有"算"这一过程，也不接受刷新。
@@ -186,8 +186,8 @@
       lsSet('cloud_drive_round', String(round));
       $('#kidText').textContent = kid + '  · 第 ' + round + ' 轮';
       log(forceRefresh && round > 0
-        ? '口令已刷新（第 ' + round + ' 轮）。老文件仍能打开，旧口令已保留在登记表里。'
-        : '口令就位', 'ok');
+        ? '钥匙已换（第 ' + round + ' 轮）。老文件仍能打开，旧口令已保留在登记表里。'
+        : '钥匙好了', 'ok');
       return true;
     }
     log('连续 24 轮都撞号，这不该发生。别再试了，来查一下登记表。', 'err');
@@ -267,7 +267,7 @@
     $('#saveToken').addEventListener('click', () => {
       window.CloudApi.setToken($('#token').value);
       state.token = window.CloudApi.token();
-      log(state.token ? '令牌已存到本机浏览器' : '已清空本机令牌', 'ok');
+      log(state.token ? '通行证已存到这台电脑' : '已清空通行证', 'ok');
     });
 
     initTheme();
@@ -324,7 +324,7 @@
 
     detectAccount();
     if (state.mode === 'simple') ensureKey();
-    log('填好令牌就能用了。');
+    log('填好通行证就能用了。');
   }
 
   /* 存一份密文。分卷时切成若干卷分别上传 ——
@@ -497,7 +497,7 @@
 
   async function doUpload() {
     if (window.CloudWorker.on()) return doUploadW();
-    if (!state.token) { log('先填访问令牌', 'err'); return; }
+    if (!state.token) { log('先填通行证', 'err'); return; }
     if (!state.pass) {
       if (state.mode === 'pro') { log('先填口令', 'err'); return; }
       if (!await ensureKey()) return;
@@ -556,7 +556,7 @@
   /* ---------- 列目录 ---------- */
   async function loadList(quiet) {
     if (window.CloudWorker.on()) return loadListW(quiet);
-    if (!state.token) { if (!quiet) log('先填令牌', 'err'); return; }
+    if (!state.token) { if (!quiet) log('先填通行证', 'err'); return; }
     if (!quiet) $('#refresh').disabled = true;
     try {
       await syncKeys();
@@ -706,7 +706,7 @@
   /* ---------- 下载 ---------- */
   async function doDownload(id) {
     if (window.CloudWorker.on()) return doDownloadW(id);
-    if (!state.token) { log('先填令牌', 'err'); return; }
+    if (!state.token) { log('先填通行证', 'err'); return; }
     const rec = state.files.find((x) => x.id === id);
     try {
       // 这个文件是用哪把口令加密的？可能不是当前这把。
