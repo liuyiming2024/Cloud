@@ -55,6 +55,17 @@ const safe=evil.filter(s=>/^[A-Za-z0-9_-]{1,64}$/.test(s));
 ok('恶意 oid 全部被挡（路径穿越防护）', safe.length===0, '漏了: '+safe.join(','));
 ok('合法 oid 能通过', /^[A-Za-z0-9_-]{1,64}$/.test('uid-real-999'));
 
+// 匿名 + 存档里是专业模式：不能显示专业档输入框。
+// 显示了就是骗人 —— 用户填的钥匙根本不会被用上（匿名永远用固定钥匙）。
+const appsrc=fs.readFileSync(path.join(ROOT,'js/app.js'),'utf8');
+ok('paint 里匿名时强制隐藏专业框（不看存档的 mode）',
+   /\$\('#proBox'\)\.style\.display = \(!anon && state\.mode === 'pro'\)\ \? '' : 'none'/.test(appsrc)
+   || /!anon && state\.mode === 'pro'/.test(appsrc));
+ok('paint 里匿名时强制显示简单框',
+   /anon \|\| state\.mode === 'simple'/.test(appsrc));
+ok('匿名分支不读 proPass（固定钥匙优先）',
+   appsrc.indexOf('isAnon()') > -1 && /anonPass\(\)/.test(appsrc));
+
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
 })().catch(e=>{console.error('崩了',e);process.exit(1)});
