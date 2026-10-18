@@ -568,7 +568,8 @@
       }
       try {
         log('加密中：' + f.name);
-        const enc = await window.CloudCrypto.encryptBlob(f, state.pass, procMode());
+        const enc = await window.CloudCrypto.encryptBlob(f, state.pass, procMode(),
+          (done, total) => { if (total > 1) log('  ' + done + '/' + total); });
         const sealed = enc.blob;
         log('  密文 ' + fmt(sealed.size) + '（明文 ' + fmt(f.size) +
             (enc.saved > 0 ? '，压缩省了 ' + fmt(enc.saved) : '') + '）');
@@ -662,7 +663,8 @@
       try {
         const id = randId();
         log('加密中：' + f.name);
-        const enc = await window.CloudCrypto.encryptBlob(f, state.pass, procMode());
+        const enc = await window.CloudCrypto.encryptBlob(f, state.pass, procMode(),
+          (done, total) => { if (total > 1) log('  ' + done + '/' + total); });
         const sealed = enc.blob;
         const fp = await window.CloudCrypto.fingerprint(f, state.pass);
         if (known.indexOf(fp) >= 0) { log('跳过：' + f.name + '（已经有了）', 'err'); continue; }
@@ -708,7 +710,11 @@
       setTimeout(() => URL.revokeObjectURL(url), 30000);
       log('已下载：' + name + '（' + fmt(plain.size) + '）', 'ok');
     } catch (e) {
-      log('下载失败：' + e.message, 'err');
+      // "不是本云盘的密文文件"这类消息太技术，翻成人话
+      const msg = /魔数|不是本云盘/.test(e.message)
+        ? '这个文件不是本云盘存的，或者内容已经坏了'
+        : e.message;
+      log('下载失败：' + msg, 'err');
     }
   }
 
@@ -748,8 +754,15 @@
     paintQuota(state.files);
     // 分卷只显示代表那一条（第 0 卷），否则一个文件会占好几行
     box.innerHTML = rows.map((f) => {
-      let nm = '（钥匙不对或已损坏）';
-      try { nm = state.pass ? window.CloudCrypto.decryptText(f.name, state.pass) : '🔒 加密文件名'; } catch (e) {}
+      // 解不开时别只说"解不开" ——
+      // 那会让人以为文件坏了、去反复重传，而真正的原因往往是
+      // 换了电脑/清了缓存导致钥匙算不回来。把最可能的原因说出来。
+      let nm = '（解不开）';
+      try {
+        nm = state.pass ? window.CloudCrypto.decryptText(f.name, state.pass) : '🔒 加密文件名';
+      } catch (e) {
+        nm = '（解不开：可能是换了设备或清过缓存）';
+      }
       const tag = f.km === 'pro' ? '<span class="kid">专业档</span>' : '';
       const vol = f.volN > 1 ? '<span class="kid">' + f.volN + ' 小块</span>' : '';
       const key = f.vid || f.id;
@@ -823,7 +836,11 @@
 
       if (r.channel === 'git') await window.CloudApi.remove(r.path, '清理下载暂存').catch(() => {});
     } catch (e) {
-      log('下载失败：' + e.message, 'err');
+      // "不是本云盘的密文文件"这类消息太技术，翻成人话
+      const msg = /魔数|不是本云盘/.test(e.message)
+        ? '这个文件不是本云盘存的，或者内容已经坏了'
+        : e.message;
+      log('下载失败：' + msg, 'err');
     }
   }
 
