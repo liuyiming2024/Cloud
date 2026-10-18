@@ -79,8 +79,8 @@
     const seg = $('#modeSeg');
     const hint = $('#modeHint');
     const HINTS = {
-      simple: '口令自动算好，不用记，换电脑也在。',
-      pro: '口令自己定，忘了就打不开了。'
+      simple: '钥匙自动算好，不用记，换电脑也在。',
+      pro: '钥匙自己定，忘了就打不开了。'
     };
     function paint() {
       const anon = window.CloudId.isAnon();
@@ -89,8 +89,14 @@
       );
       // 匿名时锁死：只有那一把固定口令，给不了选择。
       // 给了选择就是骗人 —— 选了专业模式，站长就打不开你交上去的东西了。
-      $('#simpleBox').style.display = state.mode === 'simple' ? '' : 'none';
-      $('#proBox').style.display = state.mode === 'pro' ? '' : 'none';
+      // 匿名时强制只显示简单框。
+      // 不能只看 state.mode —— 那是上次登录时存下来的，
+      // 若是 'pro'，这里会把专业档的钥匙输入框显示出来，
+      // 而 ensureKey 的匿名分支根本不读它（永远用固定钥匙）。
+      // 结果就是：用户填了口令、以为生效了，实际用的是公开那把。
+      // 宁可显示得"少了"，也不能让人产生这种误判。
+      $('#simpleBox').style.display = (anon || state.mode === 'simple') ? '' : 'none';
+      $('#proBox').style.display = (!anon && state.mode === 'pro') ? '' : 'none';
       $('#refreshKey').disabled = anon;
       seg.querySelectorAll('button').forEach((b) => { b.disabled = anon; });
       hint.textContent = anon
@@ -141,7 +147,7 @@
    * 登录了：口令由账号派生，全局唯一，撞了自动换轮次。
    * 没登录：匿名模式，用 config 里那把写死的固定口令，没得选。 */
   async function ensureKey(forceRefresh) {
-    if (!state.token && !window.CloudWorker.on()) { log('先填通行证', 'err'); return false; }
+    if (!state.token && !window.CloudWorker.on()) { log('还没接上后端，暂时用不了。', 'err'); return false; }
     await detectAccount();
 
     // 匿名模式只有一把写死的口令，没有"算"这一过程，也不接受刷新。
@@ -150,8 +156,8 @@
       state.pass = window.CloudId.anonPass();
       state.kid = await window.CloudId.keyId(state.pass);
       state.round = 0;
-      $('#kidText').textContent = '匿名固定口令（不可改）';
-      log('匿名模式：用固定口令加密，站长能打开你上传的东西。', 'ok');
+      $('#kidText').textContent = '匿名固定钥匙（不可改）';
+      log('没登录：用的是固定钥匙，站长能打开你传的东西。', 'ok');
       return true;
     }
 
@@ -328,7 +334,7 @@
 
     detectAccount();
     if (state.mode === 'simple') ensureKey();
-    log('填好通行证就能用了。');
+    log('准备好了。');
   }
 
   /* 存一份密文。分卷时切成若干卷分别上传 ——
@@ -501,7 +507,7 @@
 
   async function doUpload() {
     if (window.CloudWorker.on()) return doUploadW();
-    if (!state.token) { log('先填通行证', 'err'); return; }
+    if (!state.token) { log('还没接上后端，暂时用不了。', 'err'); return; }
     if (!state.pass) {
       if (state.mode === 'pro') { log('先填口令', 'err'); return; }
       if (!await ensureKey()) return;
@@ -565,7 +571,7 @@
   /* ---------- 列目录 ---------- */
   async function loadList(quiet) {
     if (window.CloudWorker.on()) return loadListW(quiet);
-    if (!state.token) { if (!quiet) log('先填通行证', 'err'); return; }
+    if (!state.token) { if (!quiet) log('还没接上后端，暂时用不了。', 'err'); return; }
     if (!quiet) $('#refresh').disabled = true;
     try {
       await syncKeys();
@@ -720,7 +726,7 @@
   /* ---------- 下载 ---------- */
   async function doDownload(id) {
     if (window.CloudWorker.on()) return doDownloadW(id);
-    if (!state.token) { log('先填通行证', 'err'); return; }
+    if (!state.token) { log('还没接上后端，暂时用不了。', 'err'); return; }
     const rec = state.files.find((x) => x.id === id);
     try {
       // 这个文件是用哪把口令加密的？可能不是当前这把。
