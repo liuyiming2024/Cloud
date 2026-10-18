@@ -66,6 +66,30 @@ ok('上传前先按配额预判', /guestFileMax/.test(app));
 ok('列表显示已用空间', /paintQuota/.test(app));
 ok('跨域放行身份头（否则带不过去）', /X-Access-Token/.test(wsrc));
 
+// ---- 惩罚性延迟 ----
+ok('定义了累进延迟参数', /const TARPIT\s*=/.test(wsrc));
+ok('有封顶（不能无限等）', /max:\s*\d+/.test(wsrc));
+ok('有封禁阈值（不再陪他耗）', /banAfter:\s*\d+/.test(wsrc));
+ok('延迟会翻倍（越试越久）', /Math\.pow\(2, s\.n\)/.test(wsrc));
+ok('封顶值 = 30 秒（运行时宽限期上限）', /max:\s*30000/.test(wsrc));
+
+// 三种伪造信号都走惩罚路径
+ok('伪造令牌 → 惩罚', /who\.badToken[\s\S]{0,80}deny/.test(wsrc));
+ok('非法 oid → 惩罚', /!OID_RE\.test\(oid\)[\s\S]{0,40}deny/.test(wsrc));
+ok('访问别人的空间 → 惩罚', /oid !== who\.uid[\s\S]{0,60}deny/.test(wsrc));
+
+// 该罚的罚，不该罚的别罚
+ok('没配身份服务时不算伪造（不误伤访客）', /configured/.test(wsrc) && /if \(!env\.SB_URL/.test(wsrc));
+ok('没带令牌不算伪造（老实匿名）', /if \(!tok\) return out/.test(wsrc));
+ok('站长访问别人空间不罚（他本来就该能看）', /!who\.isOwner && !oid\.startsWith/.test(wsrc));
+ok('超配额不惩罚（是正常使用，只说清差多少）',
+   /单个文件最大/.test(wsrc) && !/deny\(ip[^\)]*单个文件/.test(wsrc));
+
+// 消息要含糊，不能教他怎么改
+const denies=[...wsrc.matchAll(/deny\(ip, '([^']*)'\)/g)].map(m=>m[1]);
+ok('惩罚消息一律含糊（不透露是哪个环节错）',
+   denies.length>0 && denies.every(m=>m==='没有权限'), denies.join('|'));
+
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
 })().catch(e=>{console.error('崩了',e);process.exit(1)});
