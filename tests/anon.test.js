@@ -66,6 +66,11 @@ ok('paint 里匿名时强制显示简单框',
 ok('匿名分支不读 proPass（固定钥匙优先）',
    appsrc.indexOf('isAnon()') > -1 && /anonPass\(\)/.test(appsrc));
 
+// 解不开时要说清最可能的原因，别让人以为文件坏了去反复重传
+const app2=fs.readFileSync(path.join(ROOT,'js/app.js'),'utf8');
+ok('解不开时提示可能是换设备/清缓存', /换[了过]设备|清[了过]缓存/.test(app2));
+ok('技术错误消息翻成人话（不给用户看魔数）', /不是本云盘存的/.test(app2));
+
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
 })().catch(e=>{console.error('崩了',e);process.exit(1)});
