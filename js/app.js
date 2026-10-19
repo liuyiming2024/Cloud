@@ -489,10 +489,14 @@
     btn.disabled = false;
   }
 
+  /* 下载用的文件名也要过一遍。
+   * 文件名是上传者定的，交给浏览器前先清掉路径分隔符和控制字符。 */
   function save(blob, name) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = name;
+    a.href = url;
+    a.download = (window.CloudPro && window.CloudPro.safeName)
+      ? window.CloudPro.safeName(name) : String(name || 'file');
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
@@ -705,7 +709,9 @@
       if (rec) { try { name = window.CloudCrypto.decryptText(rec.name, pass); } catch (e) {} }
       const url = URL.createObjectURL(plain);
       const a = document.createElement('a');
-      a.href = url; a.download = name;
+      a.href = url;
+      a.download = (window.CloudPro && window.CloudPro.safeName)
+        ? window.CloudPro.safeName(name) : String(name || 'file');
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
       log('已下载：' + name + '（' + fmt(plain.size) + '）', 'ok');
@@ -829,7 +835,9 @@
 
       const url = URL.createObjectURL(plain);
       const a = document.createElement('a');
-      a.href = url; a.download = name;
+      a.href = url;
+      a.download = (window.CloudPro && window.CloudPro.safeName)
+        ? window.CloudPro.safeName(name) : String(name || 'file');
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
       log('已下载：' + name + '（' + fmt(plain.size) + '）', 'ok');
