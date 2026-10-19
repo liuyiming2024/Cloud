@@ -55,16 +55,15 @@ export default {
        * 不能看请求里传的 oid —— 那东西谁都能改（就在浏览器 localStorage 里）。
        * 让人自己说"我是站长"然后据此放行，等于没设限。
        *
-       * 所以：拿请求头里的 access_token 去 Supabase 验一次，
+       * 所以：拿请求头里的令牌去**自建会话**验一次（x-session），
        * 验出来是谁就是谁，这个 uid 伪造不了。
        * 验不出身份的一律按访客处理，配额从紧。 */
       const who = await resolveIdentity(req, env);
       const ip = req.headers.get('CF-Connecting-IP') || '';
 
-      // 信号一：带了令牌，但是假的 —— 这是在试探身份
-      if (who.configured && who.badToken) {
-        return deny(ip, '没有权限');
-      }
+      // 不再对"令牌无效"做惩罚。
+      // 自建会话下，无效和过期在服务端完全无法区分（都返回 null），
+      // 罚下去就是精准打击刚过期的合法用户。
       const repo = env.DRIVE_REPO || 'liuyiming2024/Cloud_file';
       const gh = new GitHub(env.DRIVE_PAT, repo);
 
@@ -72,10 +71,24 @@ export default {
       if (!OID_RE.test(oid)) return deny(ip, '没有权限');
 
 
-      // 信号二：验出真实身份，却去访问别人的 uid。
-      // 站长除外 —— 他本来就该能看所有人的。
-      if (who.uid && !who.isOwner && !oid.startsWith('anon-') && oid !== who.uid) {
-        return deny(ip, '没有权限');
+      /* 归属校验。**必须对访客同样生效**。
+       *
+       * 之前写成 `who.uid && ...` —— 未带令牌时 who.uid 是 null，
+       * 整条校验直接跳过。而 OID_RE 对 UUID 放行，
+       * 于是任何不带令牌的请求只要知道目标 uid，
+       * 就能 list（拿到全部文件 id）→ get 下载 → del 删除。
+       *
+       * 所以分三种情况，没有一种是"跳过"：
+       *   站长     —— 能看所有人的（他本来就该能）
+       *   已登录   —— 自己的 uid，或自己的匿名空间
+       *   没身份   —— 只能是匿名空间（anon- 后跟 32 位随机十六进制，猜不出来） */
+      if (!who.isOwner) {
+        const isAnonSpace = oid.startsWith('anon-');
+        if (who.uid) {
+          if (oid !== who.uid && !isAnonSpace) return deny(ip, '没有权限');
+        } else if (!isAnonSpace) {
+          return deny(ip, '没有权限');
+        }
       }
 
       // 列表
@@ -138,6 +151,14 @@ export default {
       if (url.pathname === '/api/get' && req.method === 'GET') {
         const id = url.searchParams.get('id') || '';
         if (!OID_RE.test(id)) return err('缺少或不合法的文件 id');
+        /*
+         * 不能只拿 oid 和 id 去拼路径 —— 那两个都是调用方给的。
+         * 必须查索引确认"这个文件确实属于这个 oid"，
+         * 否则知道别人 uid 就能直接读别人的文件（list 会把 id 一次性交出来）。
+         */
+        const idxG = await gh.readIndex();
+        const hitG = idxG.files.find((f) => f.id === id);
+        if (!hitG || hitG.oid !== oid) return deny(ip, '没有这个文件');
         let buf = await gh.getFile('files/' + oid + '/' + id + '.bin');
         if (!buf) buf = await gh.getAsset(oid + '__' + id + '.bin');
         if (!buf) return err('没有这个文件', 404);
@@ -240,22 +261,46 @@ function mb(n) {
  * 验证失败时放行 —— 那是把门开在失败分支上。 */
 async function resolveIdentity(req, env) {
   const tok = req.headers.get('X-Access-Token') || '';
-  // configured：有没有配身份服务。没配就无从判断，
-  // 不能把"我认不出你"算成"你在伪造" —— 那会误伤所有访客。
   const out = { isOwner: false, uid: null, badToken: false, configured: false };
   if (!env.SB_URL || !env.SB_KEY) return out;
   out.configured = true;
   if (!tok) return out;                 // 没带令牌 = 老实匿名，不算伪造
-  try {
-    const r = await fetch(env.SB_URL + '/auth/v1/user', {
-      headers: { Authorization: 'Bearer ' + tok, apikey: env.SB_KEY }
+
+  /* 身份必须走**自建会话**，不是 Supabase Auth。
+   *
+   * 全站的会话是自己在 sessions 表里签发的（cur_token() 读 x-session 头），
+   * 全库压根没用过 auth.uid()。而 /auth/v1/user 是 GoTrue 的接口，
+   * 拿自建令牌去问它必然 401 —— 于是每个正常登录的用户都会被判成"伪造"
+   * 然后 403，重试几次还被 tarpit 封掉。惩罚机制精准打在合法用户身上。
+   *
+   * 所以这里调自建 RPC：auth_uid() 返回当前账号 id，auth_role() 返回角色。
+   * 两个都由服务端从 x-session 推导，伪造不了。
+   *
+   * 关于 badToken：自建会话里，"令牌无效"和"令牌过期"在服务端看起来
+   * 完全一样（都返回 null），无从区分。过期是正常现象，
+   * 把过期用户当攻击者惩罚是明显的自伤，所以这里不设 badToken。
+   * 伪造行为的拦截交给下面的归属校验 —— 那才是真正拦得住的地方。 */
+  const call = async (fn) => {
+    const r = await fetch(env.SB_URL + '/rest/v1/rpc/' + fn, {
+      method: 'POST',
+      headers: {
+        apikey: env.SB_KEY,
+        'x-session': tok,
+        'Content-Type': 'application/json'
+      },
+      body: '{}'
     });
-    if (!r.ok) { out.badToken = true; return out; }   // 带了，但是假的
-    const u = await r.json();
-    out.uid = u.id || null;
-    // 站长 uid 存在 Secret 里，不写死在代码里 ——
-    // 写死等于把"谁是站长"这个判断依据公开了。
-    out.isOwner = !!(out.uid && env.OWNER_UID && out.uid === env.OWNER_UID);
+    if (!r.ok) return null;
+    const t = await r.text();
+    try { return JSON.parse(t); } catch (e) { return null; }
+  };
+
+  try {
+    const [uid, role] = await Promise.all([call('auth_uid'), call('auth_role')]);
+    out.uid = uid || null;
+    // 角色由服务端给，不靠一个写死/配置的 uid ——
+    // 那份配置会漂移，而 role 是库里的既成事实。
+    out.isOwner = (role === 'owner');
   } catch (e) {
     // 验证出错 = 验不到身份，按访客算
   }
