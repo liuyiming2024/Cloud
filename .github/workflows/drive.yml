@@ -12,6 +12,20 @@ name: drive
 #   list  私有库 index.json   ->  公开 index.json   （列目录）
 #   init  确保私有库的 index.json 存在
 
+# 同时只跑一个。
+#
+# 为什么必须串行：每个任务都是"读 index.json → 改 → 写回"。
+# 两个任务并发时，后写的那份是基于它自己读到的旧索引算出来的 ——
+# 前一个任务的改动会被整个覆盖掉。
+# 表现是：用户明明删了文件，刷新又回来了；或者传了文件，目录里没有。
+# 这种丢数据的 bug 极难复现，而且只在有人同时操作时才出现。
+#
+# 用 cancel-in-progress: false —— 排队等着，不取消。
+# 取消掉的话，正在传的文件会丢一半，那比慢一点更糟。
+concurrency:
+  group: drive-index
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:
