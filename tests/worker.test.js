@@ -47,12 +47,17 @@ ok('总量上限 = 1GB', /GUEST_TOTAL_MAX\s*=\s*1024\s*\*\s*1024\s*\*\s*1024/.te
 ok('配额只对非站长生效', /if \(!who\.isOwner\)/.test(wsrc));
 
 // 站长判定不能靠请求里传的 oid —— 那谁都能改
-ok('站长判定走 Supabase 校验（不是看请求里的 oid）',
-   /auth\/v1\/user/.test(wsrc) && /resolveIdentity/.test(wsrc));
-ok('站长 uid 放在 Secret 里，不写死在代码',
-   /env\.OWNER_UID/.test(wsrc) && !/OWNER_UID\s*=\s*'/.test(wsrc));
-ok('验证失败时按访客处理（不在失败分支放行）',
-   /if \(!r\.ok\) return out/.test(wsrc) || /catch[\s\S]{0,80}return out/.test(wsrc));
+// ---- R4-03：身份必须走自建会话，不是 Supabase Auth ----
+// 只看代码，不看注释（注释里会提到旧做法作为反面教材）
+const wcode=wsrc.replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/[^\n]*/g,'');
+ok('代码里不再调 GoTrue /auth/v1/user（那是身份体系错配）',
+   !/auth\/v1\/user/.test(wcode));
+ok('改为调自建 RPC auth_uid', /rpc\/auth_uid|rpc\/' \+ fn/.test(wsrc) && /auth_uid/.test(wsrc));
+ok('会话走 x-session 头（自建会话的约定）', /x-session/.test(wcode));
+ok('站长靠服务端给的 role 判定（不是配一个 uid）',
+   /auth_role/.test(wsrc) && /role === 'owner'/.test(wsrc) && !/OWNER_UID/.test(wsrc));
+ok('不对"令牌无效"做惩罚（过期与伪造无法区分，罚了是自伤）',
+   !/badToken[\s\S]{0,60}deny/.test(wsrc));
 
 // 配额按"人"算，不按全站算
 ok('用量按 oid 累计（按人算，不是全站）',
@@ -74,21 +79,33 @@ ok('延迟会翻倍（越试越久）', /Math\.pow\(2, s\.n\)/.test(wsrc));
 ok('封顶值 = 30 秒（运行时宽限期上限）', /max:\s*30000/.test(wsrc));
 
 // 三种伪造信号都走惩罚路径
-ok('伪造令牌 → 惩罚', /who\.badToken[\s\S]{0,80}deny/.test(wsrc));
+ok('可疑 oid 一律走惩罚路径', /!OID_RE\.test\(oid\)[\s\S]{0,40}deny/.test(wsrc));
 ok('非法 oid → 惩罚', /!OID_RE\.test\(oid\)[\s\S]{0,40}deny/.test(wsrc));
 ok('访问别人的空间 → 惩罚', /oid !== who\.uid[\s\S]{0,60}deny/.test(wsrc));
 
 // 该罚的罚，不该罚的别罚
 ok('没配身份服务时不算伪造（不误伤访客）', /configured/.test(wsrc) && /if \(!env\.SB_URL/.test(wsrc));
 ok('没带令牌不算伪造（老实匿名）', /if \(!tok\) return out/.test(wsrc));
-ok('站长访问别人空间不罚（他本来就该能看）', /!who\.isOwner && !oid\.startsWith/.test(wsrc));
+ok('站长访问别人空间不罚（他本来就该能看）', /if \(!who\.isOwner\) \{[\s\S]*?isAnonSpace/.test(wsrc));
 ok('超配额不惩罚（是正常使用，只说清差多少）',
    /单个文件最大/.test(wsrc) && !/deny\(ip[^\)]*单个文件/.test(wsrc));
+
+// ---- R4-02：归属校验必须覆盖访客 ----
+ok('归属校验不再有 who.uid && 前置（否则访客被跳过）',
+   !/if \(who\.uid && !who\.isOwner/.test(wsrc));
+ok('没身份时只允许匿名空间',
+   /else if \(!isAnonSpace\)[\s\S]{0,40}deny/.test(wsrc));
+ok('已登录只能访问自己 uid 或匿名空间',
+   /oid !== who\.uid && !isAnonSpace/.test(wsrc));
+ok('站长可访问所有人的空间', /if \(!who\.isOwner\)/.test(wsrc));
+ok('get 查索引确认归属（不能只拼路径）', /hitG\.oid !== oid/.test(wsrc));
+ok('del 查索引确认归属', /hit\.oid !== oid/.test(wsrc));
+ok('list 按 oid 过滤（不返回别人的）', /f\.oid === oid/.test(wsrc));
 
 // 消息要含糊，不能教他怎么改
 const denies=[...wsrc.matchAll(/deny\(ip, '([^']*)'\)/g)].map(m=>m[1]);
 ok('惩罚消息一律含糊（不透露是哪个环节错）',
-   denies.length>0 && denies.every(m=>m==='没有权限'), denies.join('|'));
+   denies.length>0 && denies.every(m=>/^没有(权限|这个文件)$/.test(m)), denies.join('|'));
 
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
