@@ -59,5 +59,29 @@ if(wFile&&cFile) ok('前端提示值与后端一致（单文件）', eval(wFile)
 if(wTot&&cTot) ok('前端提示值与后端一致（总量）', eval(wTot)===eval(cTot[1]),
    'w='+eval(wTot)+' cfg='+eval(cTot[1]));
 
+// ---- 语法自检 ----
+/* drive.sh 是 Actions 里跑的，语法坏了本地测试一条都不会失败 ——
+ * 只会在有人真上传时炸。必须显式 check。 */
+(function(){
+  const cp=require('child_process');
+  let code=0,msg='';
+  try{ cp.execFileSync('bash',['-n',path.join(ROOT,'.github/drive.sh')],{stdio:'pipe'}); }
+  catch(e){ code=e.status; msg=String(e.stderr||'').slice(-120); }
+  ok('drive.sh 语法可解析（坏了只有真上传时才炸）', code===0, msg);
+})();
+
+// ---- 归属校验：三条通道都要有 ----
+ok('del 校验归属', /TARGET_OID[\s\S]{0,120}不属于你/.test(sh));
+ok('get 也校验归属（不能只拼路径）', /GET_OID[\s\S]{0,120}不属于你/.test(sh));
+const iChk=sh.indexOf('GET_OID='), iGet=sh.indexOf('DST="/tmp/drive/out.bin"');
+ok('归属校验在读文件之前（不是读完才查）', iChk>0 && iChk<iGet, 'chk='+iChk+' get='+iGet);
+ok('站长可越权处理（IS_OWNER 例外）', /IS_OWNER" != "true/.test(sh));
+ok('list 按 oid 过滤', /select\(\.oid==\$o\)/.test(sh));
+
+// Worker 三条接口也要有
+ok('Worker get 校验归属', /hitG\.oid !== oid/.test(w));
+ok('Worker del 校验归属', /hit\.oid !== oid/.test(w));
+ok('Worker list 按 oid 过滤', /f\.oid === oid/.test(w));
+
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
