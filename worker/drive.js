@@ -261,27 +261,33 @@ function mb(n) {
  * 验证失败时放行 —— 那是把门开在失败分支上。 */
 async function resolveIdentity(req, env) {
   const tok = req.headers.get('X-Access-Token') || '';
-  const out = { isOwner: false, uid: null, badToken: false, configured: false };
+  const out = { isOwner: false, uid: null, role: null, badToken: false, configured: false };
   if (!env.SB_URL || !env.SB_KEY) return out;
   out.configured = true;
   if (!tok) return out;                 // 没带令牌 = 老实匿名，不算伪造
 
-  /* 身份必须走**自建会话**，不是 Supabase Auth。
+  /* 身份解析。三条约束，缺一条就是故障：
    *
-   * 全站的会话是自己在 sessions 表里签发的（cur_token() 读 x-session 头），
-   * 全库压根没用过 auth.uid()。而 /auth/v1/user 是 GoTrue 的接口，
-   * 拿自建令牌去问它必然 401 —— 于是每个正常登录的用户都会被判成"伪造"
-   * 然后 403，重试几次还被 tarpit 封掉。惩罚机制精准打在合法用户身上。
+   * ① 必须走**自建会话**（x-session 头），不是 Supabase GoTrue。
+   *    全站会话是自己签发的（cur_token() 读 x-session），全库没用过 auth.uid()。
+   *    拿自建令牌去问 /auth/v1/user 必然 401 —— 于是每个正常登录用户都被
+   *    判成"伪造"然后 403，重试几次还被 tarpit 封掉。
    *
-   * 所以这里调自建 RPC：auth_uid() 返回当前账号 id，auth_role() 返回角色。
-   * 两个都由服务端从 x-session 推导，伪造不了。
+   * ② 必须调**白名单里的**函数。
+   *    不能用 auth_uid() / auth_role() —— V-03 把 blanket grant 收窄成
+   *    逐函数白名单后，这两个被显式 `revoke ... from public` 了。
+   *    调它们会 403，uid 变 null，于是登录用户被降级成访客：
+   *    既受 100MB/1GB 配额，又因"无身份只能访问 anon- 空间"
+   *    连自己的 uid 空间都进不去 —— 完全不可用。
    *
-   * 关于 badToken：自建会话里，"令牌无效"和"令牌过期"在服务端看起来
-   * 完全一样（都返回 null），无从区分。过期是正常现象，
-   * 把过期用户当攻击者惩罚是明显的自伤，所以这里不设 badToken。
-   * 伪造行为的拦截交给下面的归属校验 —— 那才是真正拦得住的地方。 */
-  const call = async (fn) => {
-    const r = await fetch(env.SB_URL + '/rest/v1/rpc/' + fn, {
+   * ③ 所以改用 whoami()：它在白名单里（grant ... to anon, authenticated），
+   *    一次调用同时返回 id / role / status，正是我们需要的。
+   *
+   * 关于"令牌无效"是否惩罚：自建会话下无效与过期在服务端无法区分
+   * （都返回 ok:false），罚下去就是精准打击刚过期的合法用户，故不罚。
+   * 伪造行为的拦截交给归属校验 —— 那才是真正拦得住的地方。 */
+  try {
+    const r = await fetch(env.SB_URL + '/rest/v1/rpc/whoami', {
       method: 'POST',
       headers: {
         apikey: env.SB_KEY,
@@ -290,17 +296,18 @@ async function resolveIdentity(req, env) {
       },
       body: '{}'
     });
-    if (!r.ok) return null;
-    const t = await r.text();
-    try { return JSON.parse(t); } catch (e) { return null; }
-  };
-
-  try {
-    const [uid, role] = await Promise.all([call('auth_uid'), call('auth_role')]);
-    out.uid = uid || null;
-    // 角色由服务端给，不靠一个写死/配置的 uid ——
-    // 那份配置会漂移，而 role 是库里的既成事实。
-    out.isOwner = (role === 'owner');
+    if (r.ok) {
+      const j = await r.json();
+      // whoami 区分了"没登录"和"会话有效但用户没了"，两种都按访客算，
+      // 且都不惩罚 —— 都不是攻击信号。
+      if (j && j.ok === true) {
+        out.uid = j.id || null;
+        out.role = j.role || null;
+        // 站长由服务端给的角色判定，不靠一个配来的 uid —— 配置会漂移，
+        // role 是库里的既成事实。
+        out.isOwner = (j.role === 'owner');
+      }
+    }
   } catch (e) {
     // 验证出错 = 验不到身份，按访客算
   }
