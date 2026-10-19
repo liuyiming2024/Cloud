@@ -14,6 +14,23 @@ globalThis.crypto=require('crypto').webcrypto;
 (async()=>{
 console.log('Worker 纯函数');
 
+/* 语法自检。
+ * 必须做：worker/drive.js 是 ES module，页面加载不到它，
+ * 语法坏了不会有任何测试失败 —— 只会等到部署时 Worker 直接起不来。
+ * 之前就发生过一次（一处中文字符串被吃掉引号），
+ * 而期间所有测试都是绿的。 */
+(function () {
+  const os=require('os'), fs2=require('fs'), cp=require('child_process');
+  const tmp=fs2.mkdtempSync(require('path').join(os.tmpdir(),'wsyn-'));
+  const f=require('path').join(tmp,'drive.mjs');
+  fs2.writeFileSync(f, fs.readFileSync(path.join(ROOT,'worker/drive.js'),'utf8'));
+  let code=0, msg='';
+  try { cp.execFileSync(process.execPath,['--check',f],{stdio:'pipe'}); }
+  catch(e){ code=e.status; msg=String(e.stderr||'').slice(-160); }
+  fs2.rmSync(tmp,{recursive:true,force:true});
+  ok('worker/drive.js 语法可解析（坏了部署才发现就晚了）', code===0, msg);
+})();
+
 // base64 往返
 const raw=new Uint8Array(300000); for(let i=0;i<raw.length;i++)raw[i]=(i*7+3)&255;
 const b64=base64(raw.buffer);
