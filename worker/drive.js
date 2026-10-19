@@ -287,7 +287,7 @@ async function resolveIdentity(req, env) {
    * （都返回 ok:false），罚下去就是精准打击刚过期的合法用户，故不罚。
    * 伪造行为的拦截交给归属校验 —— 那才是真正拦得住的地方。 */
   try {
-    const r = await fetch(env.SB_URL + '/rest/v1/rpc/whoami', {
+    const r = await fetch(env.SB_URL + '/rest/v1/rpc/auth_uid', {
       method: 'POST',
       headers: {
         apikey: env.SB_KEY,
@@ -397,7 +397,7 @@ class GitHub {
     await this.req('/contents/' + path, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: '删除 ' + path, sha: s })
+      body: JSON.stringify({ message:删除 ' + path, sha: s })
     });
     return true;
   }
