@@ -164,12 +164,32 @@
 (function () {
   const W = () => (window.CloudCfg && window.CloudCfg.worker) || '';
 
+  /* 把后端的错误码翻成人能懂的话。
+   *
+   * 为什么必须翻：后端为了不教攻击者怎么改，错误消息一律含糊（"没有权限"）。
+   * 但同一个"没有权限"，对真实用户可能是三种完全不同的处境 ——
+   * 而其中最常见的（登录过期）用户自己一秒钟就能解决。
+   * 不翻的话，用户看到"没有权限"只会反复重试，越试越被 tarpit 拖久。 */
+  function explain(msg, status) {
+    const m = String(msg || '');
+    if (status === 403 || /没有权限|不属于你/.test(m)) {
+      // 登录过期是最常见的原因：会话会过期，而界面还显示着"已登录"。
+      // 让先去刷新登录态，比重试有用得多。
+      return '没有权限。可能是登录过期了 —— 重新登录一次再试。';
+    }
+    if (/没有这个文件/.test(m)) return '没有这个文件。';
+    if (status === 413 || /空间不够|最大/.test(m)) return m;   // 已经说得很清楚
+    return m || ('后端出错了（' + status + '）');
+  }
+
   async function wjson(url, opts) {
     const r = await fetch(url, opts);
     const t = await r.text();
     let j;
     try { j = JSON.parse(t); } catch (e) { throw new Error('后端返回了看不懂的东西：' + t.slice(0, 120)); }
-    if (!r.ok || j.ok === false) throw new Error(j.error || ('后端 ' + r.status));
+    if (!r.ok || j.ok === false) {
+      throw new Error(explain(j.error, r.status));
+    }
     return j;
   }
 
