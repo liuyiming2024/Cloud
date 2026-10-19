@@ -83,5 +83,25 @@ ok('Worker get 校验归属', /hitG\.oid !== oid/.test(w));
 ok('Worker del 校验归属', /hit\.oid !== oid/.test(w));
 ok('Worker list 按 oid 过滤', /f\.oid === oid/.test(w));
 
+// ---- 索引并发 ----
+/* index.json 是"读-改-写"，并发会互相覆盖。
+ * 表现是删了又回来、传了看不见 —— 只在有人同时操作时才出现，极难复现。 */
+const ymlPath=path.join(ROOT,'.github/workflows/drive.yml');
+if(fs.existsSync(ymlPath)){
+  const y=fs.readFileSync(ymlPath,'utf8');
+  ok('drive.yml 配了 concurrency（串行写索引）', /concurrency:/.test(y));
+  ok('不取消进行中的任务（取消会让上传丢一半）', /cancel-in-progress:\s*false/.test(y));
+  // YAML 能解析
+  let parsed=true, err='';
+  try{
+    const cp=require('child_process');
+    cp.execFileSync(process.execPath,['-e',
+      "const y=require('fs').readFileSync(process.argv[1],'utf8');"+
+      "try{require('yaml')}catch(e){process.exit(0)};require('yaml').parse(y);"
+      ,ymlPath],{stdio:'pipe'});
+  }catch(e){ parsed=false; err=String(e.stderr||'').slice(-100); }
+  ok('drive.yml 是合法 YAML（改坏了工作流直接不跑）', parsed, err);
+}
+
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
