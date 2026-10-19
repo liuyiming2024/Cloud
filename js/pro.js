@@ -44,8 +44,47 @@
   function u16(n) { return new Uint8Array([n & 255, (n >>> 8) & 255]); }
   function u32le(n) { return new Uint8Array([n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]); }
 
-  /* entries: [{ name, blob }] → zip Blob */
+  /* 把文件名清成能安全放进 zip 的样子。
+   *
+   * 为什么必须清：文件名是上传者自己定的（加密存在索引里）。
+   * 若有人把文件命名为 ../../evil.sh，而解压工具不检查路径，
+   * 解压时就会写到目标目录**外面**去 —— 这就是 zip-slip。
+   * 我们的压缩包是要被人下载下来解压的，这条不能赌解压工具做不做检查。
+   *
+   * 另外去掉盘符、绝对路径、控制字符，那些同样不该出现在压缩包里。 */
+  function safeName(n) {
+    let s = String(n || 'file');
+    s = s.replace(/\0/g, '');                    // 空字节
+    // eslint-disable-next-line no-control-regex
+    s = s.replace(/[\u0000-\u001f\u007f]/g, ''); // 控制字符
+    s = s.replace(/^[A-Za-z]:/, '');              // 盘符 C:
+    s = s.replace(/^[/\\]+/, '');                // 开头的 / 或 \
+    s = s.split(/[/\\]/).pop() || 'file';        // 只留最后一段
+    s = s.replace(/^\.+$/, 'file');               // 纯点（. / ..）
+    s = s.trim();
+    return s || 'file';
+  }
+
+  /* 同名条目加后缀，别让解压时静默覆盖 */
+  function dedupe(names) {
+    const seen = new Map();
+    return names.map((n) => {
+      const c = seen.get(n) || 0;
+      seen.set(n, c + 1);
+      if (c === 0) return n;
+      const dot = n.lastIndexOf('.');
+      return dot > 0
+        ? n.slice(0, dot) + ' (' + c + ')' + n.slice(dot)
+        : n + ' (' + c + ')';
+    });
+  }
+
+  /* entries: [{ name, blob }] → zip Blob。
+     条目名先过 safeName + dedupe，原因见上。 */
   async function zipStore(entries, onProgress) {
+    entries = entries.map((e, i) => ({ name: e.name, blob: e.blob }));
+    const cleaned = dedupe(entries.map((e) => safeName(e.name)));
+    entries = entries.map((e, i) => ({ name: cleaned[i], blob: e.blob }));
     const now = new Date();
     const tm = dosTime(now), dt = dosDate(now);
     const parts = [];      // 每个文件的：本地头 + 数据
@@ -151,6 +190,7 @@
 
   window.CloudPro = {
     zipStore: zipStore,
+    safeName: safeName,
     crc32: crc32,
     split: split,
     manifestText: manifestText
