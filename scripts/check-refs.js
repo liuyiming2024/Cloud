@@ -23,6 +23,30 @@ const ok = (n, c, e) => {
 
 console.log('未定义变量检查');
 
+const files = fs.readdirSync(path.join(ROOT, 'js')).filter(f => f.endsWith('.js'));
+
+/* 额外查一类：$('#xxx') 选的 id 在页面里到底存不存在。
+ *
+ * 这类 bug 更阴：语法对、变量也定义过，只是元素是 null。
+ * 只有真的执行到那一行才炸，而且只在特定分支炸 ——
+ * 之前删掉 #needLogin 元素后，detectAccount() 里还留着 need.style.display，
+ * 结果"已登录"这个分支一进去就报错，而未登录分支一切正常。 */
+const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+const ids = new Set();
+for (const m of html.matchAll(/\sid="([^"]+)"/g)) ids.add(m[1]);
+
+for (const f of files) {
+  const src = fs.readFileSync(path.join(ROOT, 'js', f), 'utf8');
+  const clean = src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+  const missing = new Set();
+  for (const m of clean.matchAll(/\$\(['"]#([A-Za-z0-9_-]+)['"]\)/g)) {
+    if (!ids.has(m[1])) missing.add('#' + m[1]);
+  }
+  ok(f + ' 引用的页面元素都存在', missing.size === 0, [...missing].join(', '));
+}
+
 /* 已知安全：语言内置、全局、本项目命名空间、常见对象键名 */
 const SAFE = new Set([
   // 全局
@@ -48,8 +72,6 @@ const SAFE = new Set([
   'repoSoftMax', 'iterations', 'inbox', 'worker', 'simpleSalt',
   'uid', 'token', 'nick', 'shared', 'via', 'cryptoCfg'
 ]);
-
-const files = fs.readdirSync(path.join(ROOT, 'js')).filter(f => f.endsWith('.js'));
 
 for (const f of files) {
   const src = fs.readFileSync(path.join(ROOT, 'js', f), 'utf8');
