@@ -254,6 +254,17 @@ case "$OP" in
     ;;
 
   get)
+    # 归属校验必须在取文件之前。
+    #
+    # 不能只拿 oid 和 id 去拼路径 —— 那两个都是调用方给的。
+    # 不校验的话，知道别人 uid 就能列（list 会把 id 一次交出来）再直接下载。
+    # 删除早就有这条校验（见 del），取文件不能没有。
+    IDX_GET=$(read_index)
+    GET_OID=$(echo "$IDX_GET" | jq -r --arg id "$ID" '.files[]?|select(.id==$id)|.oid' | head -1)
+    if [ -n "$GET_OID" ] && [ "$GET_OID" != "$OID" ] && [ "$IS_OWNER" != "true" ]; then
+      fail "这个文件不属于你（归属 ${GET_OID}），只有站长能处理别人的文件"
+    fi
+
     DST="/tmp/drive/out.bin"
     if ! drive_raw "${DAPI}/contents/$(store_path)?ref=main" -o "$DST" 2>/dev/null \
        || [ ! -s "$DST" ]; then
