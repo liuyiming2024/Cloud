@@ -139,7 +139,6 @@
     $('#whoSrc').textContent = '已登录';
     $('#logout').style.display = '';
     $('#toLogin').style.display = 'none';
-    need.style.display = 'none';
     return true;
   }
 
@@ -721,6 +720,7 @@
         ? '这个文件不是本云盘存的，或者内容已经坏了'
         : e.message;
       log('下载失败：' + msg, 'err');
+      if (/没有权限/.test(msg)) log('试试重新登录。', 'err');
     }
   }
 
@@ -849,6 +849,7 @@
         ? '这个文件不是本云盘存的，或者内容已经坏了'
         : e.message;
       log('下载失败：' + msg, 'err');
+      if (/没有权限/.test(msg)) log('试试重新登录。', 'err');
     }
   }
 
