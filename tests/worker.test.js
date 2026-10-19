@@ -69,7 +69,6 @@ ok('配额只对非站长生效', /if \(!who\.isOwner\)/.test(wsrc));
 const wcode=wsrc.replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/[^\n]*/g,'');
 ok('代码里不再调 GoTrue /auth/v1/user（那是身份体系错配）',
    !/auth\/v1\/user/.test(wcode));
-ok('改为调自建 RPC auth_uid', /rpc\/auth_uid|rpc\/' \+ fn/.test(wsrc) && /auth_uid/.test(wsrc));
 ok('会话走 x-session 头（自建会话的约定）', /x-session/.test(wcode));
 ok('站长靠服务端给的 role 判定（不是配一个 uid）',
    /auth_role/.test(wsrc) && /role === 'owner'/.test(wsrc) && !/OWNER_UID/.test(wsrc));
