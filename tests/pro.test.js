@@ -60,6 +60,28 @@ ok('清单含文件名', mt.includes('a.txt'));
 ok('清单说明了指纹怎么来的', /HMAC/.test(mt));
 ok('空清单也能生成', typeof P.manifestText([])==='string');
 
+// ---- 文件名净化（zip-slip 防护）----
+ok('挡住 ../../ 路径穿越', P.safeName('../../etc/passwd')==='passwd', P.safeName('../../etc/passwd'));
+ok('挡住反斜杠穿越', !/[\\/]/.test(P.safeName('..\\evil.exe')), P.safeName('..\\evil.exe'));
+ok('挡住盘符', !/:/.test(P.safeName('C:\\x\\a.txt')), P.safeName('C:\\x\\a.txt'));
+ok('挡住绝对路径', P.safeName('/abs/f.txt')==='f.txt');
+ok('纯点变 file（不是 . 或 ..）', P.safeName('..')==='file' && P.safeName('.')==='file');
+ok('空名字有兜底', P.safeName('')==='file' && P.safeName('   ')==='file');
+ok('去掉空字节和控制字符', P.safeName('a\u0000b\u0001c')==='abc');
+ok('正常文件名不受影响', P.safeName('正常 文件.txt')==='正常 文件.txt');
+ok('只保留最后一段路径', P.safeName('a/b/c.txt')==='c.txt');
+
+// 打进 zip 的名字必须是净化后的
+const evil=await P.zipStore([{name:'../../evil.sh',blob:e1},{name:'ok.txt',blob:e1}]);
+const eb=Buffer.from(await evil.arrayBuffer()).toString('latin1');
+ok('zip 里不含 ../ 条目名（zip-slip 防护生效）', !eb.includes('../'));
+ok('zip 里仍含净化后的名字', eb.includes('evil.sh') && eb.includes('ok.txt'));
+
+// 同名不覆盖
+const dup=await P.zipStore([{name:'a.txt',blob:e1},{name:'a.txt',blob:e2}]);
+const db=Buffer.from(await dup.arrayBuffer()).toString('latin1');
+ok('同名文件加了后缀（解压时不静默覆盖）', db.includes('a (1).txt'), '未找到 a (1).txt');
+
 console.log('\n通过 '+pass+'，失败 '+fail);
 process.exit(fail?1:0);
 })().catch(e=>{console.error('崩了',e);process.exit(1)});
