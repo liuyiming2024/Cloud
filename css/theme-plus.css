@@ -1,0 +1,167 @@
+/* ==========================================================================
+   theme-plus.css
+   效果引用自样式库：liuyiming2024/css_effect_map_collection
+     · 主题切换实现方案/css变量实现.html  → CSS 变量覆盖式亮/暗切换
+     · 毛玻璃效果/index.html              → backdrop-filter 毛玻璃
+     · 滚动指示器/index.html              → 顶部滚动进度条
+     · css边框四角/index.html             → 卡片四角装饰
+     · 纯css气泡背景/index.css            → Hero 区气泡背景
+   本文件只做「追加」，不改动原有任何规则；
+   主题切换通过覆盖既有 :root 变量实现，因此原样式一行都不用改。
+   ========================================================================== */
+
+/* ---------- 1. 主题切换（CSS 变量覆盖法） ---------- */
+html { color-scheme: light; }
+html[data-theme="dark"] { color-scheme: dark; }
+
+html[data-theme="dark"] {
+  --bg:#0f1218; --panel:#171b22; --panel2:#1e232b; --line:#2a313b;
+  --text:#e3e8ef; --dim:#8b95a3; --accent:#6aa9ff;
+  --ok:#3fb950; --err:#ff7b72; --warn:#e3b341;
+  --warnbg:#2b2416; --warnline:#4d422a; --errbg:#2d1a19; --errline:#4d2b28;
+}
+
+/* 未手动指定时跟随系统 */
+@media (prefers-color-scheme: dark) {
+  html[data-theme="auto"] {
+  --bg:#0f1218; --panel:#171b22; --panel2:#1e232b; --line:#2a313b;
+  --text:#e3e8ef; --dim:#8b95a3; --accent:#6aa9ff;
+  --ok:#3fb950; --err:#ff7b72; --warn:#e3b341;
+  --warnbg:#2b2416; --warnline:#4d422a; --errbg:#2d1a19; --errline:#4d2b28;
+  }
+}
+
+/* 切换时的平滑过渡（限定在颜色属性，不影响布局性能） */
+body, .nav, .panel, .card, .hero, .btn, .btn-primary, .btn-ghost {
+  transition: background-color .25s ease, color .25s ease, border-color .25s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* ---------- 2. 毛玻璃效果 ---------- */
+/* 顶栏/导航做半透明 + 背景模糊，滚动时内容从下方透出 */
+.nav, #topbar, .glass {
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  background: rgba(255, 255, 255, .72);
+}
+html[data-theme="dark"] .nav,
+html[data-theme="dark"] #topbar,
+html[data-theme="dark"] .glass {
+  background: rgba(23, 27, 34, .72);
+}
+/* 侧栏与浮层 */
+.sidebar, #sidebar, .modal, .dropdown {
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+html[data-theme="dark"] .sidebar,
+html[data-theme="dark"] #sidebar,
+html[data-theme="dark"] .modal,
+html[data-theme="dark"] .dropdown {
+  background: rgba(23, 27, 34, .88);
+}
+
+/* ---------- 3. 滚动指示器 ---------- */
+#scroll-progress {
+  position: fixed;
+  top: 0; left: 0;
+  height: 3px;
+  width: 0;
+  z-index: 9999;
+  background: linear-gradient(90deg, var(--brand, #3b7ff2), #7ee787);
+  pointer-events: none;
+  transition: width .08s linear;
+}
+
+/* ---------- 4. CSS 边框四角 ---------- */
+/* 纯伪元素实现，不需要改 DOM，四角各画两条 1px 短线 */
+.corner-box { position: relative; }
+.corner-box::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  --c: var(--brand, #3b7ff2);
+  background:
+    linear-gradient(var(--c), var(--c)) 0    0    / 14px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) 0    0    / 1px 14px no-repeat,
+    linear-gradient(var(--c), var(--c)) 100% 0    / 14px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) 100% 0    / 1px 14px no-repeat,
+    linear-gradient(var(--c), var(--c)) 0    100% / 14px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) 0    100% / 1px 14px no-repeat,
+    linear-gradient(var(--c), var(--c)) 100% 100% / 14px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) 100% 100% / 1px 14px no-repeat;
+  opacity: .55;
+}
+.corner-box:hover::before { opacity: 1; }
+
+/* ---------- 5. 纯 CSS 气泡背景 ---------- */
+.hero { position: relative; overflow: hidden; }
+.bubble-bgwall {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  pointer-events: none;
+  z-index: 0;
+}
+.bubble-bgwall li {
+  position: absolute;
+  bottom: -60px;
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background-color: rgba(59, 127, 242, .16);
+  animation: bubble-up 16s linear infinite;
+}
+html[data-theme="dark"] .bubble-bgwall li { background-color: rgba(110, 170, 255, .20); }
+.bubble-bgwall li:nth-child(1)  { left: 10%; animation-duration: 15s; }
+.bubble-bgwall li:nth-child(2)  { left: 20%; width: 34px; height: 34px; animation-duration: 11s; animation-delay: 2s; }
+.bubble-bgwall li:nth-child(3)  { left: 25%; animation-duration: 13s; animation-delay: 4s; }
+.bubble-bgwall li:nth-child(4)  { left: 40%; width: 28px; height: 28px; animation-duration: 9s; }
+.bubble-bgwall li:nth-child(5)  { left: 70%; animation-duration: 14s; animation-delay: 1s; }
+.bubble-bgwall li:nth-child(6)  { left: 80%; width: 40px; height: 40px; animation-duration: 12s; animation-delay: 3s; }
+.bubble-bgwall li:nth-child(7)  { left: 32%; width: 46px; height: 46px; animation-duration: 17s; animation-delay: 2s; }
+.bubble-bgwall li:nth-child(8)  { left: 55%; width: 18px; height: 18px; animation-duration: 15s; animation-delay: 4s; }
+.bubble-bgwall li:nth-child(9)  { left: 25%; width: 20px; height: 20px; animation-duration: 12s; animation-delay: 2s; }
+.bubble-bgwall li:nth-child(10) { left: 85%; width: 44px; height: 44px; animation-duration: 16s; animation-delay: 5s; }
+@keyframes bubble-up {
+  0%   { opacity: 0;   transform: translateY(0)      rotate(0deg); }
+  15%  { opacity: .7; }
+  50%  { opacity: .9;  transform: translateY(-55vh)  rotate(90deg); }
+  100% { opacity: 0;   transform: translateY(-110vh) rotate(180deg); }
+}
+/* 让 Hero 里原有内容浮在气泡之上 */
+.hero > *:not(.bubble-bgwall) { position: relative; z-index: 1; }
+
+/* ---------- 6. 主题切换按钮 ---------- */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 13px;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--border, rgba(128, 128, 128, .35));
+  border-radius: 999px;
+  transition: background-color .2s ease, border-color .2s ease;
+}
+.theme-toggle:hover { background: rgba(128, 128, 128, .12); }
+.theme-toggle svg { width: 14px; height: 14px; }
+/* 找不到导航容器时的浮动兜底位置 */
+.theme-toggle.is-floating {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 9998;
+  background: var(--panel, #fff);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .18);
+}
