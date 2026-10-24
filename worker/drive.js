@@ -32,17 +32,39 @@ const GUEST_TOTAL_MAX = 1024 * 1024 * 1024;    // 总共 1GB
 
 const OID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
+/* 允许跨域访问的前端域名白名单。
+ * 为什么不再用 `*`：页面携带 X-Access-Token / x-session 访问凭据型数据，
+ * `*` 意味着任何站点都能把它当前 Origin 的页面变成这个 Worker 的客户端。
+ * 虽然鉴权仍靠令牌本身（浏览器不会替任意站点携带令牌），
+ * 但收紧到白名单可以让"不该被访问的入口"在 CORS 层就直接被浏览器拦掉，
+ * 缩小暴露面。请求无 Origin 头（curl / 服务端调用）不受影响，照常放行。
+ *
+ * 新增部署域名时，在这里加一条即可。 */
+const ALLOWED_ORIGINS = [
+  'https://liuyiming2024.github.io'
+];
+
+/* 返回对应请求的 CORS 头：Origin 在白名单内则回显该 Origin，
+ * 否则不设置 Allow-Origin（浏览器会因此拦截跨域响应）。
+ * 无 Origin 头的请求（非浏览器）不设 Allow-Origin，天然放行。 */
+function corsHeaders(req) {
+  const origin = req.headers.get('Origin');
+  const allowOrigin = origin && ALLOWED_ORIGINS.indexOf(origin) >= 0 ? origin : null;
+  const h = {
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Access-Token'
+  };
+  if (allowOrigin) h['Access-Control-Allow-Origin'] = allowOrigin;
+  return h;
+}
+
 export default {
   async fetch(req, env) {
-    // 跨域：页面在 github.io，Worker 在 workers.dev，必须放行
-    if (req.method === 'OPTIONS') return preflight();
+    // 跨域：页面在 github.io，Worker 在 workers.dev，必须放行（白名单见上）
+    if (req.method === 'OPTIONS') return preflight(req);
 
     const url = new URL(req.url);
-    const cors = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Access-Token'
-    };
+    const cors = corsHeaders(req);
     const json = (obj, code = 200) =>
       new Response(JSON.stringify(obj), { status: code, headers: { ...cors, 'Content-Type': 'application/json' } });
     const err = (msg, code = 400) => json({ ok: false, error: msg }, code);
@@ -314,12 +336,11 @@ async function resolveIdentity(req, env) {
   return out;
 }
 
-function preflight() {
+function preflight(req) {
+  const cors = corsHeaders(req);
   return new Response(null, {
     headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Access-Token',
+      ...cors,
       'Access-Control-Max-Age': '86400'
     }
   });
