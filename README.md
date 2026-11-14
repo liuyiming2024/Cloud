@@ -67,3 +67,12 @@ const off = Cloud.api.on('change', () => Cloud.api.list());
 ## 许可
 
 保留所有权利。这是一个个人项目，不提供复刻与二次部署指南。
+
+## fx-plus 是集群权威源
+
+`css/fx-plus.css` 与 `js/fx-plus.js` 是视觉效果层的**权威源**：
+主页 `liuyiming2024.github.io`（内联生成 + `--check-upstream`）、
+`Chat`（`assets/`）、`Code`（`css/` + `js/`）都从这两份复制。
+
+改这里之后，主页 / Chat / Code 的 CI 都会红，按提示把副本同步过去即可；
+不要反过来改副本 —— 那样只会让四份越差越远。
