@@ -76,3 +76,19 @@ const off = Cloud.api.on('change', () => Cloud.api.list());
 
 改这里之后，主页 / Chat / Code 的 CI 都会红，按提示把副本同步过去即可；
 不要反过来改副本 —— 那样只会让四份越差越远。
+
+## 后端 Worker：写好了，刻意未启用
+
+`worker/drive.js`（Cloudflare Worker）与 `worker/部署.md` 是完整的后端方案：
+启用后令牌放在 Worker 的 Secrets 里，浏览器从头到尾拿不到也不需要，
+游客打开页面什么都不用填，配额也由服务端真正拦截。
+
+**但 `js/config.js` 的 `worker: ''` 是刻意的，不是漏配。**
+当前走浏览器直连 GitHub：页面要求用户自己填一枚有
+`contents: write` + `actions: write` 的 PAT，功能完整，也没有任何欺骗。
+启用 Worker 需要先部署、配 4 个 Secrets、确认 Supabase 的 `whoami()`
+仍在 anon 白名单里、再把地址填进配置 —— 属于部署动作，用户 2026-11-15
+明确不切换，维持现状。
+
+要启用时照 `worker/部署.md` 三步走即可；结论与理由见
+`Tool/threads/决策记录.md` 第 2 条。
