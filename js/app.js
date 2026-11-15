@@ -145,8 +145,12 @@
   /* ---------- 拿到一把口令 ----------
    * 登录了：口令由账号派生，全局唯一，撞了自动换轮次。
    * 没登录：匿名模式，用 config 里那把写死的固定口令，没得选。 */
+  /* ⚠ 2026-11-15 现网核对修正：下面这几处原本写「还没接上后端，暂时用不了」。
+       那句话把「缺一枚 PAT」说成「缺后端」—— 实际直连模式在用户填了
+       PAT 之后完全可用，Worker 只是可选的第二条路。误导文案会让人
+       以为功能没做完、干等着，也不会去填令牌。改成明确说该做什么。 */
   async function ensureKey(forceRefresh) {
-    if (!state.token && !window.CloudWorker.on()) { log('还没接上后端，暂时用不了。', 'err'); return false; }
+    if (!state.token && !window.CloudWorker.on()) { log('还没填令牌，也没接后端 —— 先在设置里填一枚 PAT 就能用。', 'err'); return false; }
     await detectAccount();
 
     // 匿名模式只有一把写死的口令，没有"算"这一过程，也不接受刷新。
@@ -545,7 +549,7 @@
       }
     }
     if (window.CloudWorker.on()) return doUploadW();
-    if (!state.token) { log('还没接上后端，暂时用不了。', 'err'); return; }
+    if (!state.token) { log('还没填令牌，也没接后端 —— 先在设置里填一枚 PAT 就能用。', 'err'); return; }
     if (!state.pass) {
       if (state.mode === 'pro') { log('先填口令', 'err'); return; }
       if (!await ensureKey()) return;
@@ -614,7 +618,7 @@
   /* ---------- 列目录 ---------- */
   async function loadList(quiet) {
     if (window.CloudWorker.on()) return loadListW(quiet);
-    if (!state.token) { if (!quiet) log('还没接上后端，暂时用不了。', 'err'); return; }
+    if (!state.token) { if (!quiet) log('还没填令牌，也没接后端 —— 先在设置里填一枚 PAT 就能用。', 'err'); return; }
     if (!quiet) $('#refresh').disabled = true;
     try {
       await syncKeys();
@@ -800,7 +804,7 @@
   /* ---------- 下载 ---------- */
   async function doDownload(id) {
     if (window.CloudWorker.on()) return doDownloadW(id);
-    if (!state.token) { log('还没接上后端，暂时用不了。', 'err'); return; }
+    if (!state.token) { log('还没填令牌，也没接后端 —— 先在设置里填一枚 PAT 就能用。', 'err'); return; }
     const rec = state.files.find((x) => x.id === id);
     try {
       // 这个文件是用哪把口令加密的？可能不是当前这把。
